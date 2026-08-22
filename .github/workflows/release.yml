@@ -20,6 +20,9 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           rustup target add wasm32-unknown-unknown --toolchain 1.97.0
+          # Without this the toolchain is merely installed and `cargo test` below runs on the
+          # runner default. build.sh pins itself with `rustup run`, but the test step does not.
+          rustup override set 1.97.0
           cargo install wasm-tools --version 1.236.1 --locked
 
       - name: Test

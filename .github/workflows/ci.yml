@@ -40,18 +40,26 @@ jobs:
           cargo install wasm-tools --version "$WASM_TOOLS_VERSION" --locked
 
       # The WIT in this repository is a mirror of dekopon's. Out of tree there is no shared file to
-      # keep them honest, so fetch the originals at the commit Cargo.lock resolved and compare. An
+      # keep them honest, so fetch the originals at the release Cargo.lock resolved and compare. An
       # interface change upstream fails here loudly, rather than producing a component that
       # mismatches the host it will be loaded into.
-      - name: Check the WIT mirrors against the pinned dekopon rev
+      - name: Check the WIT mirrors against the pinned dekopon release
         run: |
           set -euo pipefail
-          # The full resolved commit, from Cargo.lock rather than the abbreviated rev in
-          # Cargo.toml: it is what cargo actually built against, and it cannot be ambiguous.
-          rev=$(sed -n 's/.*dekopon?rev=[0-9a-f]*#\([0-9a-f]*\)".*/\1/p' Cargo.lock | head -1)
-          test -n "$rev"
-          echo "pinned dekopon rev: $rev"
-          base="https://raw.githubusercontent.com/dekopon-agents/dekopon/$rev"
+          # Read the version from Cargo.lock rather than Cargo.toml: it is what cargo actually
+          # resolved, and dekopon tags each published release v<version>, so the tag fetched below
+          # and the code compiled against cannot skew.
+          version=$(sed -n '/^name = "dekopon-provider-sdk"$/,/^$/s/^version = "\(.*\)"$/\1/p' Cargo.lock | head -1)
+          storage_version=$(sed -n '/^name = "dekopon-provider-storage"$/,/^$/s/^version = "\(.*\)"$/\1/p' Cargo.lock | head -1)
+          test -n "$version"
+          # The two are published from one workspace at one version. If they ever skew, the WIT
+          # fetched below matches only one of them and the mirror check proves nothing.
+          if [ "$version" != "$storage_version" ]; then
+            echo "dekopon-provider-sdk $version and dekopon-provider-storage $storage_version disagree" >&2
+            exit 1
+          fi
+          echo "pinned dekopon release: v$version"
+          base="https://raw.githubusercontent.com/dekopon-agents/dekopon/v$version"
           curl -fsSL "$base/crates/dekopon-provider-sdk/wit/provider.wit" -o "$RUNNER_TEMP/provider.wit"
           curl -fsSL "$base/wit/storage/storage.wit" -o "$RUNNER_TEMP/storage.wit"
           cmp "$RUNNER_TEMP/provider.wit" wit/deps/provider.wit
