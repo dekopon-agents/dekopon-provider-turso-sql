@@ -1,0 +1,35 @@
+[workspace]
+
+[package]
+name = "dekopon-turso-sql-provider"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+license = "MIT OR Apache-2.0"
+description = "SQLite-compatible SQL capabilities for Dekopon, as a Wasm component backed by Turso"
+repository = "https://github.com/dekopon-agents/dekopon-provider-turso-sql"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned by rev rather than branch: dekopon-provider-gh pins a branch and that pin has already
+# rotted. `dekopon-provider-storage` is listed in dekopon's .github/release-crates.txt but was
+# added after the v0.9.0 tag, so it is not on crates.io yet. When dekopon publishes 0.10.0,
+# replace both of these with `version = "=0.10.0"` — together, so the two cannot skew.
+dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon", rev = "2acaed1" }
+dekopon-provider-storage = { git = "https://github.com/dekopon-agents/dekopon", rev = "2acaed1", default-features = false, features = ["durable-files"] }
+serde_json = "1.0.151"
+wit-bindgen = { version = "0.44.0", default-features = false, features = ["macros", "realloc"] }
+
+# dekopon-agents/turso, branch `dekopon`. The fork carries only what
+# wasm32-unknown-unknown needs; see that commit for the upstreamable split.
+turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad334991b5bc8cad9806ec2225bcd3593bfa6", default-features = false, features = ["fs", "uuid"] }
+
+# Three getrandom majors are genuinely in the graph (0.2 via aes-gcm, 0.3 via
+# rand 0.9, 0.4 via rand 0.10). Each needs its custom backend registered
+# against the broker's entropy import; see src/io.rs.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
+getrandom03 = { package = "getrandom", version = "0.3" }
+getrandom04 = { package = "getrandom", version = "0.4" }

@@ -1,0 +1,3 @@
+target/
+turso-sql-provider.wasm
+turso-sql-provider.wasm.sha256

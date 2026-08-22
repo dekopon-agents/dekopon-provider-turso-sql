@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  PROVIDER_RUST_TOOLCHAIN: "1.97.0"
+  WASM_TOOLS_VERSION: "1.236.1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal --component clippy rustfmt
+          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
+          rustup override set "$PROVIDER_RUST_TOOLCHAIN"
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      # The component is what ships; a crate that only compiles natively is not evidence.
+      # `rustflags` carries the getrandom backend selection, which cannot be expressed in
+      # Cargo.toml and applies only to wasm32 — the host steps above must not see it, or they
+      # select a custom entropy backend that nothing registers for the host target. build.sh
+      # reads the same file, so the two cannot skew.
+      - run: RUSTFLAGS="$(cat rustflags)" cargo check --locked --target wasm32-unknown-unknown
+
+  component:
+    name: Reproducible component
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
+          cargo install wasm-tools --version "$WASM_TOOLS_VERSION" --locked
+
+      # The WIT in this repository is a mirror of dekopon's. Out of tree there is no shared file to
+      # keep them honest, so fetch the originals at the rev Cargo.toml pins and compare. An
+      # interface change upstream fails here loudly, rather than producing a component that
+      # mismatches the host it will be loaded into.
+      - name: Check the WIT mirrors against the pinned dekopon rev
+        run: |
+          set -euo pipefail
+          rev=$(sed -n 's/.*github\.com\/dekopon-agents\/dekopon", rev = "\([0-9a-f]*\)".*/\1/p' \
+            Cargo.toml | head -1)
+          test -n "$rev"
+          echo "pinned dekopon rev: $rev"
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/dekopon-agents/dekopon "$RUNNER_TEMP/dekopon"
+          git -C "$RUNNER_TEMP/dekopon" fetch --depth 1 origin "$rev"
+          git -C "$RUNNER_TEMP/dekopon" show \
+            "$rev:crates/dekopon-provider-sdk/wit/provider.wit" > "$RUNNER_TEMP/provider.wit"
+          git -C "$RUNNER_TEMP/dekopon" show \
+            "$rev:wit/storage/storage.wit" > "$RUNNER_TEMP/storage.wit"
+          cmp "$RUNNER_TEMP/provider.wit" wit/deps/provider.wit
+          cmp "$RUNNER_TEMP/storage.wit" wit/deps/storage.wit
+
+      - name: Build the component, then rebuild it and compare
+        run: |
+          set -euo pipefail
+          ./build.sh
+          # Determinism is the property the harness exists for, so assert it rather than trust it.
+          # A second build from a clean target directory must land on the same bytes.
+          CARGO_TARGET_DIR="$RUNNER_TEMP/rebuild" ./build.sh "$RUNNER_TEMP/rebuild.wasm"
+          cmp turso-sql-provider.wasm "$RUNNER_TEMP/rebuild.wasm"
+
+      # A provider that reaches the outside world through anything but its declared imports is not
+      # sandboxed by the broker. These three are the ambient escape hatches wasm32 makes available.
+      - name: Reject ambient dependencies
+        run: |
+          set -euo pipefail
+          cargo tree --locked --target wasm32-unknown-unknown --edges normal,build > deps.tree
+          if grep -Eqi '(^|[[:space:]])(wasm-bindgen|js-sys|wasi)([[:space:]]|$)' deps.tree; then
+            echo "forbidden ambient dependency" >&2
+            grep -Ein '(^|[[:space:]])(wasm-bindgen|js-sys|wasi)([[:space:]]|$)' deps.tree >&2
+            exit 1
+          fi
+
+      - name: Inspect the component
+        run: |
+          set -euo pipefail
+          core=$(find target/wasm32-unknown-unknown/release -maxdepth 1 -type f -name '*.wasm' -print -quit)
+          test -n "$core"
+          wasm-tools metadata show "$core" | grep -q 'Rust'
+          wasm-tools metadata show turso-sql-provider.wasm | grep -q 'wit-bindgen-rust'
+          # The whole point of the storage host: this provider talks to durable-files and to
+          # nothing else. Any other core import is a new authority nobody reviewed.
+          wasm-tools print "$core" | grep '(import ' > core-imports.txt || true
+          test -s core-imports.txt
+          if grep -Fv 'dekopon:storage/durable-files@0.1.0' core-imports.txt; then
+            echo "unexpected core import" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turso-sql-provider.wasm
+          path: |
+            turso-sql-provider.wasm
+            turso-sql-provider.wasm.sha256

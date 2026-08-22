@@ -1,0 +1,25 @@
+package dekopon:provider@0.2.0;
+
+/// A minimal JSON-over-WIT contract for experimental read-only providers.
+world provider {
+    /// Returns a JSON-encoded provider manifest.
+    export describe: func() -> string;
+
+    /// Invokes one declared capability and returns a JSON-encoded response.
+    export invoke: func(capability: string, input-json: string) -> string;
+}
+
+/// A provider that also contributes command words to the sandboxed shell.
+///
+/// Separate from `provider` so a host can require the base contract and treat this export as
+/// optional, letting a component built against an earlier package version keep loading. A provider
+/// declaring command words in its manifest without exporting this is refused at load.
+world provider-commands {
+    include provider;
+
+    /// Rewrites one argv into a capability proposal, as JSON.
+    ///
+    /// Pure: the result is a proposal, authorized exactly as any other. This grants nothing and
+    /// must not depend on host imports.
+    export resolve-command: func(argv: list<string>) -> string;
+}

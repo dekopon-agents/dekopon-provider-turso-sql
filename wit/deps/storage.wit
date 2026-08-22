@@ -1,0 +1,106 @@
+package dekopon:storage@0.1.0;
+
+interface jsonl {
+    enum storage-error {
+        not-found,
+        already-exists,
+        invalid-name,
+        invalid-argument,
+        permission-denied,
+        quota-exceeded,
+        busy,
+        timeout,
+        unsupported,
+        corrupt,
+        io,
+    }
+
+    record chunk {
+        bytes: list<u8>,
+        next-offset: u64,
+        eof: bool,
+    }
+
+    size: func(name: string) -> result<u64, storage-error>;
+
+    read-chunk: func(name: string, offset: u64, max-bytes: u32)
+        -> result<chunk, storage-error>;
+
+    /// `record` excludes its terminating LF. The host appends exactly one LF.
+    append: func(name: string, expected-size: u64, %record: list<u8>)
+        -> result<u64, storage-error>;
+
+    /// Contents must be empty or complete LF-terminated JSONL.
+    replace: func(name: string, expected-size: u64, contents: list<u8>)
+        -> result<_, storage-error>;
+}
+
+interface durable-files {
+    flags open-flags {
+        read,
+        write,
+        create,
+        create-new,
+        delete-on-close,
+    }
+
+    enum durability {
+        data,
+        data-and-metadata,
+        full,
+    }
+
+    enum lock-level {
+        none,
+        shared,
+        reserved,
+        pending,
+        exclusive,
+    }
+
+    enum storage-error {
+        not-found,
+        already-exists,
+        invalid-name,
+        invalid-argument,
+        permission-denied,
+        quota-exceeded,
+        busy,
+        timeout,
+        unsupported,
+        corrupt,
+        io,
+    }
+
+    record file-stat {
+        size: u64,
+        identity: u64,
+    }
+
+    resource file {
+        read-at: func(offset: u64, max-bytes: u32)
+            -> result<list<u8>, storage-error>;
+        write-at: func(offset: u64, bytes: list<u8>)
+            -> result<_, storage-error>;
+        size: func() -> result<u64, storage-error>;
+        truncate: func(size: u64) -> result<_, storage-error>;
+        sync: func(mode: durability) -> result<_, storage-error>;
+        lock: func(level: lock-level) -> result<_, storage-error>;
+        unlock: func(to: lock-level) -> result<_, storage-error>;
+        check-reserved-lock: func() -> result<bool, storage-error>;
+    }
+
+    open: func(name: string, %flags: open-flags)
+        -> result<file, storage-error>;
+    stat: func(name: string)
+        -> result<option<file-stat>, storage-error>;
+    remove: func(name: string, mode: durability)
+        -> result<_, storage-error>;
+    rename-atomic: func(%from: string, %to: string, replace: bool, mode: durability)
+        -> result<_, storage-error>;
+
+    random-bytes: func(length: u32)
+        -> result<list<u8>, storage-error>;
+    monotonic-time-ns: func() -> result<u64, storage-error>;
+    wall-time-ms: func() -> result<u64, storage-error>;
+}

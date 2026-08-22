@@ -1,0 +1,9 @@
+package dekopon:turso-sql@0.1.0;
+
+/// SQLite-compatible SQL over broker-owned durable files. The engine is
+/// `turso_core` compiled to wasm32-unknown-unknown; it imports no WASI and
+/// reaches storage, entropy, and both clocks only through this world.
+world provider {
+    include dekopon:provider/provider-commands@0.2.0;
+    import dekopon:storage/durable-files@0.1.0;
+}

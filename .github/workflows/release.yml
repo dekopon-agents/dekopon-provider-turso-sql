@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain 1.97.0
+          cargo install wasm-tools --version 1.236.1 --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build the component
+        run: ./build.sh
+
+      # Reproducibility and provenance answer different questions: the attestation below proves
+      # which workflow in which repository produced this file, and the rebuild proves the file
+      # follows from the source. A release should not ship without both.
+      - name: Rebuild and compare
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR="$RUNNER_TEMP/rebuild" ./build.sh "$RUNNER_TEMP/rebuild.wasm"
+          cmp turso-sql-provider.wasm "$RUNNER_TEMP/rebuild.wasm"
+
+      # The component is what runs under broker authority, so its provenance is the thing worth
+      # attesting. A consumer verifies the digest before the broker ever compiles it.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: turso-sql-provider.wasm
+
+      - name: Publish the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            turso-sql-provider.wasm turso-sql-provider.wasm.sha256
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same artifact, second channel. An image build can pull it by digest without a GitHub API
+      # call, the way dekopon's ci/stage-image-context.sh consumes an out-of-tree provider.
+      - name: Publish the OCI artifact
+        run: |
+          curl -fsSL https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz \
+            | tar -xz -C /usr/local/bin oras
+          version="${GITHUB_REF_NAME#v}"
+          oras push "ghcr.io/dekopon-agents/provider-turso-sql:${version}" \
+            --artifact-type application/vnd.dekopon.provider.v1+wasm \
+            turso-sql-provider.wasm:application/wasm
