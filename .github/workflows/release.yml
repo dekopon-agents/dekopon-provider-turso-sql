@@ -2,81 +2,362 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  PROVIDER_RUST_TOOLCHAIN: "1.97.0"
+  WASM_TOOLS_VERSION: "1.236.1"
+  ORAS_VERSION: "1.2.3"
+  ORAS_LINUX_AMD64_SHA256: "b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    name: build and verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-metadata.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the immutable tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install the pinned toolchain
-        run: |
-          rustup toolchain install 1.97.0 --profile minimal
-          rustup target add wasm32-unknown-unknown --toolchain 1.97.0
-          # Without this the toolchain is merely installed and `cargo test` below runs on the
-          # runner default. build.sh pins itself with `rustup run`, but the test step does not.
-          rustup override set 1.97.0
-          cargo install wasm-tools --version 1.236.1 --locked
-
-      # Unit tests only: the integration suite loads the component, which does not exist yet.
-      - name: Unit tests
-        run: cargo test --locked --lib
-
-      - name: Build the component
-        run: ./build.sh
-
-      # Now that the component exists, run it. These load the real 11 MB artifact into a fake
-      # broker over a real storage host; a release that ships an engine which bricks its own
-      # namespace on the twentieth write should not get this far.
-      - name: Component integration tests
-        run: cargo test --locked --test integration
-
-      # Reproducibility and provenance answer different questions: the attestation below proves
-      # which workflow in which repository produced this file, and the rebuild proves the file
-      # follows from the source. A release should not ship without both.
-      - name: Rebuild and compare
+      - name: Verify annotated stable SemVer tag, package version, and main ancestry
+        id: release-metadata
+        shell: bash
         run: |
           set -euo pipefail
-          CARGO_TARGET_DIR="$RUNNER_TEMP/rebuild" ./build.sh "$RUNNER_TEMP/rebuild.wasm"
-          cmp turso-sql-provider.wasm "$RUNNER_TEMP/rebuild.wasm"
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "error: release tag must be strict v<major>.<minor>.<patch> SemVer" >&2
+            exit 1
+          fi
+          # checkout resolves a tag to its commit; fetch the tag ref itself before checking its
+          # object type so an annotated remote tag is not mistaken for a lightweight local one.
+          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+          if [[ "$(git cat-file -t "refs/tags/$tag")" != tag ]]; then
+            echo "error: $tag must be an annotated tag" >&2
+            exit 1
+          fi
+          head_sha=$(git rev-parse HEAD)
+          tag_sha=$(git rev-parse "refs/tags/$tag^{}")
+          if [[ "$head_sha" != "$GITHUB_SHA" || "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "error: checkout and $tag must both resolve to event SHA $GITHUB_SHA" >&2
+            exit 1
+          fi
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -er '.packages[] | select(.name == "dekopon-turso-sql-provider") | .version')
+          if [[ "$tag" != "v$version" ]]; then
+            echo "error: tag $tag does not match Cargo.toml version $version" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "error: release event SHA does not point into main" >&2
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
 
-      # The component is what runs under broker authority, so its provenance is the thing worth
-      # attesting. A consumer verifies the digest before the broker ever compiles it.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+      - name: Install pinned Rust and wasm-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
+          rustup override set "$PROVIDER_RUST_TOOLCHAIN"
+          rustup run "$PROVIDER_RUST_TOOLCHAIN" cargo install wasm-tools \
+            --version "$WASM_TOOLS_VERSION" --locked
+
+      # Run the native unit suite before creating the component so this step cannot accidentally
+      # pass by exercising the checked-in release artifact instead of the crate under test.
+      - name: Unit tests
+        run: cargo test --locked --package dekopon-turso-sql-provider --lib
+
+      - name: Build and verify the component
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build.sh
+          sha256sum --check --strict turso-sql-provider.wasm.sha256
+          wasm-tools validate turso-sql-provider.wasm
+
+      # The component exists now, so run the real SQL engine against the fake broker and durable
+      # storage host. These tests cover behavior that native unit tests cannot execute.
+      - name: Component integration tests
+        run: cargo test --locked --package dekopon-turso-sql-provider --test integration
+
+      - name: Check out an independent rebuild
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          subject-path: turso-sql-provider.wasm
+          ref: ${{ github.sha }}
+          path: rebuild
+          persist-credentials: false
 
-      - name: Publish the release assets
+      - name: Rebuild independently and compare bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd rebuild && ./build.sh)
+          cmp turso-sql-provider.wasm rebuild/turso-sql-provider.wasm
+          cmp turso-sql-provider.wasm.sha256 rebuild/turso-sql-provider.wasm.sha256
+
+      - name: Upload the verified release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-component
+          path: |
+            turso-sql-provider.wasm
+            turso-sql-provider.wasm.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: attest component
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify downloaded artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd dist && sha256sum --check --strict turso-sql-provider.wasm.sha256)
+      - name: Attest the component
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/turso-sql-provider.wasm
+
+  draft:
+    name: create or verify draft release
+    needs: attest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download verified component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify downloaded artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd dist && sha256sum --check --strict turso-sql-provider.wasm.sha256)
+      - name: Inspect existing release state
+        id: release-state
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq 'add' >"$RUNNER_TEMP/releases.json"
+          count=$(jq --arg tag "$GITHUB_REF_NAME" \
+            '[.[] | select(.tag_name == $tag)] | length' "$RUNNER_TEMP/releases.json")
+          case "$count" in
+            0) echo "mode=create" >>"$GITHUB_OUTPUT" ;;
+            1)
+              draft=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+                '.[] | select(.tag_name == $tag) | .draft' "$RUNNER_TEMP/releases.json")
+              if [[ "$draft" != true ]]; then
+                echo "error: an already-published release exists for $GITHUB_REF_NAME" >&2
+                exit 1
+              fi
+              echo "mode=reuse" >>"$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "error: multiple releases unexpectedly use $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+          esac
+      - name: Create draft release
+        if: steps.release-state.outputs.mode == 'create'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --draft \
+            --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            turso-sql-provider.wasm turso-sql-provider.wasm.sha256
+            dist/turso-sql-provider.wasm dist/turso-sql-provider.wasm.sha256
+      - name: Verify exact draft assets and bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq 'add' >"$RUNNER_TEMP/releases.json"
+          count=$(jq --arg tag "$GITHUB_REF_NAME" \
+            '[.[] | select(.tag_name == $tag)] | length' "$RUNNER_TEMP/releases.json")
+          [[ "$count" == 1 ]]
+          release_id=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '.[] | select(.tag_name == $tag) | .id' "$RUNNER_TEMP/releases.json")
+          draft=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '.[] | select(.tag_name == $tag) | .draft' "$RUNNER_TEMP/releases.json")
+          [[ "$draft" == true ]]
+          assets=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '[.[] | select(.tag_name == $tag) | .assets[].name] | sort | join("\n")' \
+            "$RUNNER_TEMP/releases.json")
+          expected=$'turso-sql-provider.wasm\nturso-sql-provider.wasm.sha256'
+          [[ "$assets" == "$expected" ]]
+          mkdir "$RUNNER_TEMP/release-assets"
+          for name in turso-sql-provider.wasm turso-sql-provider.wasm.sha256; do
+            asset_id=$(jq -r --arg tag "$GITHUB_REF_NAME" --arg name "$name" \
+              '.[] | select(.tag_name == $tag) | .assets[] | select(.name == $name) | .id' \
+              "$RUNNER_TEMP/releases.json")
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              >"$RUNNER_TEMP/release-assets/$name"
+          done
+          (cd "$RUNNER_TEMP/release-assets" && \
+            sha256sum --check --strict turso-sql-provider.wasm.sha256)
+          cmp dist/turso-sql-provider.wasm "$RUNNER_TEMP/release-assets/turso-sql-provider.wasm"
+          cmp dist/turso-sql-provider.wasm.sha256 \
+            "$RUNNER_TEMP/release-assets/turso-sql-provider.wasm.sha256"
+          test -n "$release_id"
+      - name: Remove only a newly created failed draft
+        if: failure() && steps.release-state.outputs.mode == 'create'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -o pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq 'add' >"$RUNNER_TEMP/cleanup.json" || exit 0
+          release_id=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '.[] | select(.tag_name == $tag and .draft == true) | .id' \
+            "$RUNNER_TEMP/cleanup.json")
+          if [[ -n "$release_id" ]]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" || true
+          fi
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+  ghcr:
+    name: publish identical GHCR artifact
+    needs: [build, draft]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download verified component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify downloaded artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd dist && sha256sum --check --strict turso-sql-provider.wasm.sha256)
+      - name: Authenticate to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Same artifact, second channel. An image build can pull it by digest without a GitHub API
-      # call, the way dekopon's ci/stage-image-context.sh consumes an out-of-tree provider.
-      - name: Publish the OCI artifact
+      - name: Install pinned ORAS
+        shell: bash
         run: |
-          curl -fsSL https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz \
-            | tar -xz -C /usr/local/bin oras
-          version="${GITHUB_REF_NAME#v}"
-          oras push "ghcr.io/dekopon-agents/provider-turso-sql:${version}" \
+          set -euo pipefail
+          archive="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
+          install -m 0755 "$RUNNER_TEMP/oras" "$RUNNER_TEMP/bin-oras"
+      - name: Publish and verify the identical component layer
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/dekopon-agents/provider-turso-sql:$VERSION"
+          "$RUNNER_TEMP/bin-oras" push "$ref" \
             --artifact-type application/vnd.dekopon.provider.v1+wasm \
-            turso-sql-provider.wasm:application/wasm
+            dist/turso-sql-provider.wasm:application/wasm
+          expected="sha256:$(awk '{print $1}' dist/turso-sql-provider.wasm.sha256)"
+          "$RUNNER_TEMP/bin-oras" manifest fetch "$ref" >"$RUNNER_TEMP/manifest.json"
+          jq -e --arg expected "$expected" '
+            (.layers | length) == 1 and
+            (.layers[0].digest == $expected) and
+            (.layers[0].mediaType == "application/wasm")
+          ' "$RUNNER_TEMP/manifest.json" >/dev/null
+
+  finalize:
+    name: finalize GitHub release
+    needs: [build, ghcr]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download verified component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify draft and exact assets before publication
+        id: draft-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check --strict turso-sql-provider.wasm.sha256)
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq 'add' >"$RUNNER_TEMP/releases.json"
+          count=$(jq --arg tag "$GITHUB_REF_NAME" \
+            '[.[] | select(.tag_name == $tag)] | length' "$RUNNER_TEMP/releases.json")
+          [[ "$count" == 1 ]]
+          release_id=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '.[] | select(.tag_name == $tag and .draft == true) | .id' \
+            "$RUNNER_TEMP/releases.json")
+          test -n "$release_id"
+          assets=$(jq -r --arg tag "$GITHUB_REF_NAME" \
+            '[.[] | select(.tag_name == $tag) | .assets[].name] | sort | join("\n")' \
+            "$RUNNER_TEMP/releases.json")
+          expected=$'turso-sql-provider.wasm\nturso-sql-provider.wasm.sha256'
+          [[ "$assets" == "$expected" ]]
+          echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
+      - name: Finalize the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft-release.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false >"$RUNNER_TEMP/published.json"
+          test "$(jq -r .draft "$RUNNER_TEMP/published.json")" = false
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .draft)" = false
