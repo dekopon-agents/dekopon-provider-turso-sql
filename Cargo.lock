@@ -638,11 +638,13 @@ dependencies = [
 [[package]]
 name = "dekopon-broker-host"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94755f3097fcf3b94811e52732aa437e81c031b39690de45ceb2fc99f5016ef0"
 dependencies = [
- "dekopon-capability 0.10.0",
- "dekopon-core 0.10.0",
+ "dekopon-capability",
+ "dekopon-core",
  "dekopon-http-host",
- "dekopon-provider-sdk 0.10.0",
+ "dekopon-provider-sdk",
  "dekopon-storage-host",
  "serde",
  "serde_json",
@@ -656,30 +658,12 @@ dependencies = [
 [[package]]
 name = "dekopon-capability"
 version = "0.10.0"
-dependencies = [
- "dekopon-core 0.10.0",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "dekopon-capability"
-version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f6a2fff5f53099535024d8d275edf9f6bdce80a483048d181fb10aff7b967de"
 dependencies = [
- "dekopon-core 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dekopon-core",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "dekopon-core"
-version = "0.10.0"
-dependencies = [
- "serde",
  "thiserror 2.0.20",
 ]
 
@@ -696,9 +680,11 @@ dependencies = [
 [[package]]
 name = "dekopon-http-host"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ded733d4fec8716a579d70ac394e24fe3211c3ef52abd3bac1bba81291bd60a4"
 dependencies = [
- "dekopon-capability 0.10.0",
- "dekopon-core 0.10.0",
+ "dekopon-capability",
+ "dekopon-core",
  "futures-util",
  "reqwest",
  "serde",
@@ -710,22 +696,11 @@ dependencies = [
 [[package]]
 name = "dekopon-provider-sdk"
 version = "0.10.0"
-dependencies = [
- "dekopon-capability 0.10.0",
- "dekopon-core 0.10.0",
- "serde",
- "serde_json",
- "wit-bindgen 0.44.0",
-]
-
-[[package]]
-name = "dekopon-provider-sdk"
-version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f20ddcf8a29c733fffb0bb3cc4e4963fb70bb3026a18dce8397d0bfbe0390545"
 dependencies = [
- "dekopon-capability 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dekopon-core 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dekopon-capability",
+ "dekopon-core",
  "serde",
  "serde_json",
  "wit-bindgen 0.44.0",
@@ -734,10 +709,12 @@ dependencies = [
 [[package]]
 name = "dekopon-provider-sdk-testkit"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7518bdd9b9599d5b6904710030a50a53da8ef4977662188c8bea0332a540f08"
 dependencies = [
  "dekopon-broker-host",
- "dekopon-capability 0.10.0",
- "dekopon-core 0.10.0",
+ "dekopon-capability",
+ "dekopon-core",
  "dekopon-storage-host",
  "serde_json",
  "tempfile",
@@ -756,9 +733,11 @@ dependencies = [
 [[package]]
 name = "dekopon-storage-host"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34281feb7191928d221b79113198a15664806dc96c1ab5cfce3f38050982fef1"
 dependencies = [
- "dekopon-capability 0.10.0",
- "dekopon-core 0.10.0",
+ "dekopon-capability",
+ "dekopon-core",
  "fs2",
  "getrandom 0.4.3",
  "rustix",
@@ -774,7 +753,7 @@ dependencies = [
 name = "dekopon-turso-sql-provider"
 version = "0.1.0"
 dependencies = [
- "dekopon-provider-sdk 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dekopon-provider-sdk",
  "dekopon-provider-sdk-testkit",
  "dekopon-provider-storage",
  "divan",
