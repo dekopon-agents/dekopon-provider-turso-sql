@@ -16,6 +16,21 @@ else: no WASI, no JS interop, no C.
 {"statements":["CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)","INSERT INTO note(body) VALUES('first')","SELECT id, body FROM note"]}
 ```
 
+**Wrap bulk writes in a transaction.** A statement sent outside `BEGIN` commits on its own, and a
+commit writes a whole 64 KiB page — so the write budget is spent per *statement*, not per row, and
+roughly 256 of them exhaust `max_write_bytes_per_invocation` (16 MiB) no matter how little each one
+writes. Two hundred single-row inserts fit; four hundred do not, and the evidence is identical to a
+thousand because the ceiling is reached at the same statement either way. The same thousand rows
+between one `BEGIN` and one `COMMIT` land comfortably, since they share pages:
+
+```json
+{"statements":["BEGIN","INSERT INTO note(body) VALUES('a')","INSERT INTO note(body) VALUES('b')","COMMIT"]}
+```
+
+Host calls are not what binds — about two per inserted row over a fixed floor of roughly thirty,
+still under a seventh of the 4096 ceiling when the write budget runs out. An invocation that does
+trip a ceiling is refused whole and leaves the database readable.
+
 ## What the engine actually does
 
 Turso is WAL-only. It does not implement a rollback journal, `PRAGMA journal_mode = DELETE` is a
@@ -136,6 +151,36 @@ Every `processed-by` row must be `rustc`, `wit-component`, or `wit-bindgen-rust`
 means the C aegis was linked in and the pure-rust cfg regressed. CI asserts this, along with the
 absence of `wasm-bindgen`, `js-sys`, and `wasi` from the dependency graph, and that the only core
 import is `dekopon:storage/durable-files@0.1.0`.
+
+## Testing
+
+Two suites, split because one of them needs an artifact the other one builds.
+
+```console
+cargo test --lib              # unit tests; no component required
+./build.sh
+cargo test --test integration # runs the component
+cargo bench                   # timings; not run in CI
+```
+
+The unit tests cover what is reachable natively: statement refusal, the SQL-to-JSON mapping, the
+argv rewrite, and the manifest. That is all of it — every host import expands to `unreachable!()`
+off `wasm32`, so `DekoponIo` and `DekoponFile` cannot be driven from a native test at all.
+
+Everything else is covered by running the real component against a real storage host, using
+[`dekopon-provider-sdk-testkit`](https://docs.rs/dekopon-provider-sdk-testkit). It is a fake
+*broker* — it mints authorization directly instead of consulting Cedar and a constraint catalog —
+but the host below that is the deployment's, at the deployment's `StorageLimits`. So the zero-fill
+and entropy-chunking paths are exercised under the same 256 KiB and 256-byte ceilings that make
+them fragile, rather than against a mock that would have to restate them.
+
+The load-bearing one is `the_write_ahead_log_is_truncated_before_each_invocation_ends`. It writes
+twenty times and then reads, which an un-truncated log cannot survive. If you are changing `exec`,
+delete the `PRAGMA wal_checkpoint(TRUNCATE)` line and confirm that test goes red before trusting
+it — a WAL regression is silent until the namespace is already unreadable.
+
+`the_lock_ladder_is_never_walked` pins the claim above that `lock` and `unlock` are called zero
+times. An engine bump that starts locking turns it red, which is the intended way to find out.
 
 ## The fork is not optional, and it is coupled to this crate
 

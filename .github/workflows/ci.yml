@@ -21,7 +21,10 @@ jobs:
           rustup override set "$PROVIDER_RUST_TOOLCHAIN"
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      # Unit tests only. The integration suite needs the built component, so it runs in the
+      # `component` job below, which has one. Splitting them keeps a green test step from meaning
+      # "nothing ran", which is what `cargo test` reported here while this crate had no tests.
+      - run: cargo test --locked --lib
       # The component is what ships; a crate that only compiles natively is not evidence.
       # `rustflags` carries the getrandom backend selection, which cannot be expressed in
       # Cargo.toml and applies only to wasm32 — the host steps above must not see it, or they
@@ -73,6 +76,12 @@ jobs:
           # A second build from a clean target directory must land on the same bytes.
           CARGO_TARGET_DIR="$RUNNER_TEMP/rebuild" ./build.sh "$RUNNER_TEMP/rebuild.wasm"
           cmp turso-sql-provider.wasm "$RUNNER_TEMP/rebuild.wasm"
+
+      # The component exists now, so run it against a fake broker backed by a real storage host.
+      # This is the only place the engine's behaviour is actually observed; everything else in
+      # this job inspects the artifact without executing it.
+      - name: Component integration tests
+        run: cargo test --locked --test integration
 
       # A provider that reaches the outside world through anything but its declared imports is not
       # sandboxed by the broker. These three are the ambient escape hatches wasm32 makes available.

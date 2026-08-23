@@ -34,3 +34,21 @@ turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad3349
 getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
 getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
+
+[dev-dependencies]
+# Pinned exactly, and to the same version as the two dependencies above, for the same reason: the
+# three are published together from one dekopon workspace and must not skew.
+dekopon-provider-sdk-testkit = "=0.10.0"
+divan = "0.1.21"
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "exec"
+harness = false
+
+# Wasmtime and Cranelift compile the 11 MB component on every `FakeBroker`, and an unoptimised
+# Cranelift takes about eighty seconds to do it. Optimising dependencies — but not this crate,
+# which stays debuggable — turns the integration suite from eleven minutes into something anyone
+# will actually run. `build.sh` builds `--release`, so none of this reaches the shipped component.
+[profile.dev.package."*"]
+opt-level = 2

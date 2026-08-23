@@ -25,11 +25,18 @@ jobs:
           rustup override set 1.97.0
           cargo install wasm-tools --version 1.236.1 --locked
 
-      - name: Test
-        run: cargo test --locked
+      # Unit tests only: the integration suite loads the component, which does not exist yet.
+      - name: Unit tests
+        run: cargo test --locked --lib
 
       - name: Build the component
         run: ./build.sh
+
+      # Now that the component exists, run it. These load the real 11 MB artifact into a fake
+      # broker over a real storage host; a release that ships an engine which bricks its own
+      # namespace on the twentieth write should not get this far.
+      - name: Component integration tests
+        run: cargo test --locked --test integration
 
       # Reproducibility and provenance answer different questions: the attestation below proves
       # which workflow in which repository produced this file, and the rebuild proves the file
