@@ -10,6 +10,7 @@
 
 mod support;
 
+use dekopon_provider_sdk_testkit::CommandRunOutcome;
 use serde_json::{Value, json};
 use support::broker;
 
@@ -205,6 +206,59 @@ async fn an_unknown_capability_is_refused() {
     assert_eq!(error.provider_failure(), None, "{error}");
 }
 
+/// The `turso` command word, exercised across the `run-command` export the component actually
+/// ships — the only place the new CLI world is proven on the wire rather than natively.
+///
+/// A proposal is the rewrite, not its result, so the last leg runs the proposal through `invoke`
+/// to close the loop: the word and the capability have to agree about the input shape.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
+    let broker = broker().await;
+
+    let help = broker
+        .run_command("turso", &["--help".to_owned()], None)
+        .await
+        .expect("the component exports run-command");
+    let CommandRunOutcome::Rendered {
+        stdout,
+        stderr,
+        status,
+    } = help
+    else {
+        panic!("--help renders rather than proposing: {help:?}");
+    };
+    assert_eq!(status, 0, "{stdout}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert!(stdout.starts_with("Usage: turso"), "{stdout}");
+
+    let empty = broker
+        .run_command("turso", &[], None)
+        .await
+        .expect("empty argv is answered, not trapped");
+    let CommandRunOutcome::Rendered { status, .. } = empty else {
+        panic!("empty argv is a usage error: {empty:?}");
+    };
+    assert_eq!(status, 2);
+
+    let piped = broker
+        .run_command("turso", &["-".to_owned()], Some("SELECT 1"))
+        .await
+        .expect("a piped statement is answered");
+    let CommandRunOutcome::Proposed { capability, input } = piped else {
+        panic!("a piped statement becomes a proposal: {piped:?}");
+    };
+    assert_eq!(capability.as_str(), "turso.exec");
+    assert_eq!(input, json!({"statements": ["SELECT 1"]}));
+
+    // The proposal is authorized on the ordinary path; running it proves the word and the
+    // capability agree about the input shape.
+    let output = broker
+        .invoke(capability.as_str(), input)
+        .await
+        .expect("the word's own proposal invokes");
+    assert_eq!(rows(&output, 0)[0], json!([1]), "{output}");
+}
+
 /// Pins the README's claim that the host's five-level lock ladder is available but unused.
 ///
 /// `turso_core` never calls `File::lock_file` on this target, because its shared-memory WAL
@@ -294,15 +348,26 @@ fn host_calls(output: &Value) -> u64 {
         .sum()
 }
 
-/// What happens at the write ceiling, and whether the namespace survives it.
+/// What happens at the write ceiling, and what the namespace looks like afterwards.
 ///
 /// A thousand single-row inserts in one invocation amplify to roughly 16 MiB of 64 KiB page
 /// writes and trip `max_write_bytes_per_invocation`. That is the real bound on a batch — the host
-/// call count is still under a seventh of its own ceiling when this fires. The part worth pinning
-/// is the recovery: the invocation is refused as a whole, and the database it was writing into is
-/// still readable afterwards.
+/// call count is still under a seventh of its own ceiling when this fires.
+///
+/// **This is destructive, and it did not used to be.** Through `dekopon-storage-host` 0.12 a
+/// failed invocation was rolled back whole, so an oversized batch left a database that still
+/// read. 0.13.0 applies writes per host call and has no invocation rollback, so the frames the
+/// batch managed to commit stay in the write-ahead log — and the log is then larger than
+/// `max_read_bytes_per_call`, which is the terminal condition the closing
+/// `PRAGMA wal_checkpoint(TRUNCATE)` exists to prevent. That checkpoint never runs on a batch
+/// that dies partway, so the namespace is unreadable from the next invocation on and no later
+/// invocation can recover it: reading the log is itself the call that is refused.
+///
+/// Pinned rather than fixed. The provider cannot see the host's remaining write budget, and the
+/// committed frames are real data that a guest-side recovery would have to throw away. Keep bulk
+/// loads inside one `BEGIN`/`COMMIT`, as the test below this one does.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_oversized_batch_is_refused_without_damaging_the_database() {
+async fn an_oversized_batch_is_refused_and_leaves_the_namespace_unreadable() {
     let broker = broker().await;
 
     broker
@@ -332,13 +397,23 @@ async fn an_oversized_batch_is_refused_without_damaging_the_database() {
         "expected a quota refusal, got {error}"
     );
 
-    // The transaction was refused whole: the pre-existing row is intact and nothing from the
-    // rejected batch landed.
-    let output = broker
+    // What the batch did commit before the refusal is still on disk — there is no rollback — and
+    // it is an order of magnitude more than the one surviving row needs.
+    let bytes = data_bytes(broker.storage_root());
+    assert!(bytes > 8 * 1024 * 1024, "only {bytes} durable bytes remain");
+
+    // And that is what makes the namespace terminal: the log now exceeds
+    // `max_read_bytes_per_call`, so a plain read is refused for quota rather than answered, by
+    // the host and not by the provider.
+    let error = broker
         .invoke("turso.exec", exec(&["SELECT body FROM note"]))
         .await
-        .expect("the namespace is still readable after a quota refusal");
-    assert_eq!(rows(&output, 0), &vec![json!(["survivor"])], "{output}");
+        .expect_err("an un-checkpointed log this size cannot be read back");
+    assert_eq!(error.provider_failure(), None, "{error}");
+    assert!(
+        error.to_string().contains("quota"),
+        "expected a quota refusal, got {error}"
+    );
 }
 
 /// The workaround for the ceiling above, and the reason it is a ceiling on *statements*.

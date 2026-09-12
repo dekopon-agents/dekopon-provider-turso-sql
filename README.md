@@ -28,8 +28,34 @@ between one `BEGIN` and one `COMMIT` land comfortably, since they share pages:
 ```
 
 Host calls are not what binds — about two per inserted row over a fixed floor of roughly thirty,
-still under a seventh of the 4096 ceiling when the write budget runs out. An invocation that does
-trip a ceiling is refused whole and leaves the database readable.
+still under a seventh of the 4096 ceiling when the write budget runs out.
+
+**An invocation that trips the write ceiling takes the namespace with it.** The storage host
+applies writes per host call and has no invocation rollback, so the frames a dying batch already
+committed stay in the write-ahead log, the closing checkpoint never runs, and the log is then
+larger than `max_read_bytes_per_call` — the terminal condition described below. Every later
+invocation, including a pure `SELECT`, is refused for quota, and nothing can recover it: reading
+the log is itself the call that gets refused. Stay inside the budget, and wrap bulk loads in a
+transaction so that the budget is one page rather than one per statement.
+
+## The `turso` command word
+
+The provider contributes one word to the sandboxed shell. Every argument is one statement, in
+order, and the word rewrites them into a single `turso.exec` proposal authorized on exactly the
+path a direct `cap turso.exec {…}` call takes:
+
+```console
+turso 'CREATE TABLE note(id INTEGER PRIMARY KEY, body TEXT)' 'SELECT * FROM note'
+turso --help          # the usage page, exit 0
+turso                 # the usage page on stderr, exit 2
+echo 'SELECT 1' | turso -
+```
+
+`turso -` runs *one* statement, the piped value verbatim. It is not a script runner: `prepare`
+takes a single statement, and splitting a multi-statement file here would need a SQL-aware
+splitter — one that knows a semicolon inside a string literal is not a terminator — and would
+otherwise silently run only the first statement of what was piped. Send a script as one argument
+per statement instead.
 
 ## What the engine actually does
 
@@ -50,8 +76,9 @@ lock state. `lock`, `unlock`, and `check-reserved-lock` are called zero times in
 The adapter still walks the ladder one rung at a time when the engine does ask, because the host
 rejects a skipped promotion.
 
-Durability is the invocation transaction, not the guest's `sync`. The host commits the database and
-its write-ahead log together, so there is no torn-WAL state to recover from.
+Durability is the host call, not the guest's `sync` and not the invocation. Each `write-at`,
+`truncate`, and `remove` is applied as it is made, and a failed invocation is not rolled back —
+which is what makes an over-budget batch terminal rather than merely refused.
 
 ## Three things that will bite a modification
 
@@ -104,8 +131,8 @@ Requires the pinned toolchain and `wasm-tools`, because component encoding is no
 versions and the build is meant to be reproducible:
 
 ```console
-rustup toolchain install 1.97.0 --profile minimal
-cargo install wasm-tools --version 1.236.1 --locked
+rustup toolchain install 1.98.1 --profile minimal
+cargo install wasm-tools --version 1.259.0 --locked
 ./build.sh
 ```
 
@@ -163,9 +190,10 @@ cargo test --test integration # runs the component
 cargo bench                   # timings; not run in CI
 ```
 
-The unit tests cover what is reachable natively: statement refusal, the SQL-to-JSON mapping, the
-argv rewrite, and the manifest. That is all of it — every host import expands to `unreachable!()`
-off `wasm32`, so `DekoponIo` and `DekoponFile` cannot be driven from a native test at all.
+The unit tests cover what is reachable natively: statement refusal, the SQL-to-JSON mapping, every
+argv shape the `turso` word answers, and the manifest. That is all of it — every host import
+expands to `unreachable!()` off `wasm32`, so `DekoponIo` and `DekoponFile` cannot be driven from a
+native test at all.
 
 Everything else is covered by running the real component against a real storage host, using
 [`dekopon-provider-sdk-testkit`](https://docs.rs/dekopon-provider-sdk-testkit). It is a fake
