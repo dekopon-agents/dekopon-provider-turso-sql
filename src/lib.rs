@@ -9,15 +9,17 @@
 //! Turso is WAL-only; it does not implement a rollback journal and never
 //! requests shared memory on this target, so the host's five-level lock ladder
 //! is available but unused. The database and its write-ahead log are two
-//! ordinary durable files committed together by one invocation transaction.
+//! ordinary durable files, written through per host call: the host has no
+//! invocation rollback, so an invocation that dies partway leaves behind
+//! whatever it had already written.
 
 mod io;
 
 use std::sync::Arc;
 
 use dekopon_provider_sdk::{
-    CapabilityId, CommandInvocation, EffectKind, Idempotency, Provider, ProviderApiVersion,
-    ProviderCapability, ProviderError, ProviderManifest, RiskLevel,
+    CapabilityId, CommandRun, EffectKind, Provider, ProviderApiVersion, ProviderCapability,
+    ProviderError, ProviderManifest, RiskLevel,
 };
 use serde_json::{Map, Value, json};
 use turso_core::{Connection, Database, IO, SqliteDialect, StepResult, Value as SqlValue};
@@ -50,6 +52,26 @@ const CACHE_PAGES: u32 = 256;
 /// rewrites the whole file inside a single invocation's byte budget.
 const REFUSED: [&str; 1] = ["vacuum"];
 
+/// The one capability this provider declares, named once so `manifest()` and `run_command` cannot
+/// drift apart.
+const EXEC: &str = "turso.exec";
+
+/// The `turso` word's help page. Hand-written: the whole argv surface is "every argument is a
+/// statement", which a parser would only obscure.
+const HELP: &str = "Usage: turso <STATEMENT>...\n\
+\x20      turso -\n\
+\n\
+Runs each STATEMENT against the namespace database, in order, as one `turso.exec`\n\
+proposal, and returns each statement's rows.\n\
+\n\
+One argument is one statement. Wrap bulk writes in BEGIN/COMMIT: the invocation\n\
+write budget is spent per statement, not per row.\n\
+\n\
+`turso -` runs the single statement piped into the word.\n\
+\n\
+Options:\n\
+\x20     --help  Print help\n";
+
 struct TursoSqlProvider;
 
 impl Provider for TursoSqlProvider {
@@ -60,11 +82,10 @@ impl Provider for TursoSqlProvider {
             description: "SQLite-compatible SQL over broker-owned durable files".to_owned(),
             command_words: vec!["turso".to_owned()],
             capabilities: vec![ProviderCapability {
-                id: "turso.exec".parse().expect("static capability identifier"),
+                id: EXEC.parse().expect("static capability identifier"),
                 description: "Executes SQL statements against the namespace database".to_owned(),
                 effect: EffectKind::LocalWrite,
                 risk: RiskLevel::Medium,
-                idempotency: Idempotency::Conditional,
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -82,20 +103,31 @@ impl Provider for TursoSqlProvider {
     }
 
     fn invoke(capability: &CapabilityId, input: Value) -> Result<Value, ProviderError> {
-        if capability.as_str() != "turso.exec" {
+        if capability.as_str() != EXEC {
             return Err(failure("invalid-input", "unknown capability"));
         }
         exec(input)
     }
 
-    fn resolve_command(argv: &[String]) -> Result<CommandInvocation, ProviderError> {
-        if argv.is_empty() {
-            return Err(failure("invalid-input", "expected at least one statement"));
+    /// Hand-rolled: every argument is a statement, so there is no tree to declare. `--help`
+    /// renders at status 0, a lone `-` runs what was piped into the word, and anything else is
+    /// the rewrite — argv straight into one `turso.exec` proposal, in order.
+    fn run_command(argv: &[String], stdin: Option<&str>) -> Result<CommandRun, ProviderError> {
+        match argv {
+            [flag] if flag == "--help" => Ok(CommandRun::rendered(HELP, 0)),
+            // One piped statement, not a script: `prepare` takes a single statement, so splitting
+            // a multi-statement file here would need a SQL-aware splitter and would silently run
+            // only part of what was piped.
+            [dash] if dash == "-" => match stdin {
+                Some(statement) if !statement.trim().is_empty() => Ok(proposal(&[statement])),
+                _ => Ok(CommandRun::rendered_error(
+                    "turso -: nothing was piped in\n",
+                    2,
+                )),
+            },
+            [] => Ok(CommandRun::rendered_error(HELP, 2)),
+            statements => Ok(proposal(statements)),
         }
-        Ok(CommandInvocation {
-            capability: "turso.exec".parse().expect("static capability identifier"),
-            input: json!({"statements": argv}),
-        })
     }
 }
 
@@ -243,11 +275,19 @@ fn sql_to_json(value: &SqlValue) -> Value {
     }
 }
 
+fn proposal(statements: &[impl AsRef<str>]) -> CommandRun {
+    let statements: Vec<&str> = statements.iter().map(AsRef::as_ref).collect();
+    CommandRun::proposal(
+        EXEC.parse().expect("static capability identifier"),
+        json!({"statements": statements}),
+    )
+}
+
 fn failure(code: &str, detail: &str) -> ProviderError {
     ProviderError::new(code, detail)
 }
 
-dekopon_provider_sdk::export_provider_with_commands!(TursoSqlProvider, bindings);
+dekopon_provider_sdk::export_provider_with_cli!(TursoSqlProvider, bindings);
 
 #[cfg(test)]
 mod tests {
@@ -339,11 +379,19 @@ mod tests {
         assert_eq!(blob, json!({"blob": 3}));
     }
 
+    fn argv(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| (*word).to_owned()).collect()
+    }
+
+    fn run(words: &[&str], stdin: Option<&str>) -> CommandRun {
+        TursoSqlProvider::run_command(&argv(words), stdin).expect("the word is never declined")
+    }
+
     #[test]
-    fn resolve_command_rewrites_argv_into_one_proposal() {
-        let resolved =
-            TursoSqlProvider::resolve_command(&["SELECT 1".to_owned(), "SELECT 2".to_owned()])
-                .expect("argv becomes a proposal");
+    fn run_command_rewrites_argv_into_one_proposal() {
+        let CommandRun::Proposal(resolved) = run(&["SELECT 1", "SELECT 2"], None) else {
+            panic!("argv becomes a proposal");
+        };
         assert_eq!(resolved.capability.as_str(), "turso.exec");
         assert_eq!(
             resolved.input,
@@ -351,10 +399,61 @@ mod tests {
         );
     }
 
+    /// Empty argv used to be a decline. It is now what a command-line program does with no
+    /// operands: the usage page on stderr at status 2.
     #[test]
-    fn resolve_command_refuses_empty_argv() {
-        let error = TursoSqlProvider::resolve_command(&[]).expect_err("no statement to run");
-        assert_eq!(error.code(), "invalid-input");
+    fn run_command_refuses_empty_argv_as_a_usage_error() {
+        assert_eq!(
+            run(&[], None),
+            CommandRun::rendered_error(HELP, 2),
+            "empty argv is a usage error, not a proposal"
+        );
+    }
+
+    #[test]
+    fn run_command_renders_help_on_stdout_at_status_zero() {
+        let CommandRun::Rendered {
+            stdout,
+            stderr,
+            status,
+        } = run(&["--help"], None)
+        else {
+            panic!("--help renders rather than proposing");
+        };
+        assert_eq!(status, 0);
+        assert!(stderr.is_empty(), "{stderr}");
+        assert!(stdout.starts_with("Usage: turso"), "{stdout}");
+    }
+
+    /// A piped statement is one statement, not a script: `prepare` takes a single statement, so
+    /// the value arrives in the array whole rather than split on semicolons.
+    #[test]
+    fn run_command_runs_one_piped_statement() {
+        let CommandRun::Proposal(resolved) = run(&["-"], Some("SELECT 1; SELECT 2")) else {
+            panic!("a piped statement becomes a proposal");
+        };
+        assert_eq!(resolved.capability.as_str(), "turso.exec");
+        assert_eq!(
+            resolved.input,
+            json!({"statements": ["SELECT 1; SELECT 2"]})
+        );
+    }
+
+    #[test]
+    fn run_command_refuses_a_dash_with_nothing_piped() {
+        for stdin in [None, Some(""), Some("  \n ")] {
+            let CommandRun::Rendered {
+                stdout,
+                stderr,
+                status,
+            } = run(&["-"], stdin)
+            else {
+                panic!("{stdin:?} has no statement to run");
+            };
+            assert_eq!(status, 2, "{stdin:?}");
+            assert!(stdout.is_empty(), "{stdout}");
+            assert!(stderr.contains("nothing was piped in"), "{stderr}");
+        }
     }
 
     #[test]
