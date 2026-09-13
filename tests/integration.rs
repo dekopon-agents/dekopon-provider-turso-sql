@@ -244,7 +244,12 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
         .run_command("turso", &["-".to_owned()], Some("SELECT 1"))
         .await
         .expect("a piped statement is answered");
-    let CommandRunOutcome::Proposed { capability, input } = piped else {
+    let CommandRunOutcome::Proposed {
+        capability,
+        input,
+        secret_use: _,
+    } = piped
+    else {
         panic!("a piped statement becomes a proposal: {piped:?}");
     };
     assert_eq!(capability.as_str(), "turso.exec");
