@@ -660,9 +660,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-broker-host"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "918f0b2fee02ff9aff41869b007f5a79ad14afd2be87aec7c316264cd2a64fca"
+checksum = "fff83205715de95c99e8dbca2b1820d70002a9c5be89e2779ff84fd1c68eb5f4"
 dependencies = [
  "dekopon-capability",
  "dekopon-core",
@@ -680,9 +680,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-capability"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a42301934fb6650c6cdd9fcabadcddb65fb82c9dd1baeb29c15e6783c91292fe"
+checksum = "766afe13fcfb25cb24afd00a4894e6a8e3f73ba3158540ea9a83b2c0e6f1ff03"
 dependencies = [
  "dekopon-core",
  "serde",
@@ -692,9 +692,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-core"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab993c8d4b1f440c63dfdb00275bdfbc30fd51ae650035624666e807be06f016"
+checksum = "a15f8ce2bae51613640f4d46fec4b2add00ff6a59b3f57e3559233ebd8360805"
 dependencies = [
  "libc",
  "serde",
@@ -703,9 +703,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-http-host"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f72aaa254dd96f8199c1b2a3c448aafb1b136302b9141fad5a847adfd56dd0b"
+checksum = "c3385376046a5bd75f8e1493b2357f74e0bf7054a55993d5444debc95cd9110c"
 dependencies = [
  "base64 0.23.1",
  "dekopon-capability",
@@ -720,9 +720,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-provider-sdk"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3744dadb6220a9c0f50ce2ee58ef709d0141b3a1faa4e7bda9ca8beab6e2399b"
+checksum = "85099a8b9d7fe66a653ea4e3621ccc490df6e84d54632de64e2022e4cc983ac9"
 dependencies = [
  "dekopon-capability",
  "dekopon-core",
@@ -730,14 +730,13 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "wasmtime",
- "wit-bindgen 0.62.0",
 ]
 
 [[package]]
 name = "dekopon-provider-sdk-testkit"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14b8b640025495f32c6af4fd502e2eea683c3bec84a0b5905365ffd1faefff8f"
+checksum = "a185a6011778654d9cfb61be4c22ea4f4549f0cad9bc90e8a0a44e6e097ac70c"
 dependencies = [
  "dekopon-broker-host",
  "dekopon-capability",
@@ -750,18 +749,18 @@ dependencies = [
 
 [[package]]
 name = "dekopon-provider-storage"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b7a23a492b4ea028b59c77c1b66fa7a85aad17eb7bb2bc858745c08f2b7368a"
+checksum = "0895cc65cf927735dbff348576622761035f4e63f379271df871e58f244eaa10"
 dependencies = [
  "wit-bindgen 0.62.0",
 ]
 
 [[package]]
 name = "dekopon-storage-host"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6457a91be4390eb9af34957a9f291673f5351386612a4f86503e160c6933a7a0"
+checksum = "740d853e2d7aaed18f963b654a0c054cc54659c625674cb7896989ce66b3fd2a"
 dependencies = [
  "dekopon-capability",
  "dekopon-core",
@@ -776,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "dekopon-turso-sql-provider"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dekopon-provider-sdk",
  "dekopon-provider-sdk-testkit",
