@@ -28,7 +28,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 }
 
 fn component() -> PathBuf {
-    if let Some(path) = std::env::var_os("TURSO_SQL_COMPONENT") {
+    if let Some(path) = std::env::var_os("DEKOPON_PROVIDER_COMPONENT") {
         return PathBuf::from(path);
     }
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("turso-sql-provider.wasm");

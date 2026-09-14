@@ -1,0 +1,7 @@
+# Bumps the provider-workflows pin (and the other SHA-pinned actions) when a new vN tag lands.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

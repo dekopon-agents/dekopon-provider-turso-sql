@@ -13,15 +13,11 @@ use dekopon_provider_sdk_testkit::{FakeBroker, StorageAccess, StorageInterface};
 /// This panics rather than skipping: a suite that quietly passes when the thing under test is
 /// missing is the exact failure this crate's tests were added to end.
 pub fn component() -> PathBuf {
-    if let Some(path) = std::env::var_os("TURSO_SQL_COMPONENT") {
-        return PathBuf::from(path);
-    }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("turso-sql-provider.wasm");
-    assert!(
-        path.exists(),
-        "{} is missing. Run ./build.sh first, or set TURSO_SQL_COMPONENT.",
-        path.display()
+    let path = PathBuf::from(
+        std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
+            .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component"),
     );
+    assert!(path.exists(), "{} is missing", path.display());
     path
 }
 
