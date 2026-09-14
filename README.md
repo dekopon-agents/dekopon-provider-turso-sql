@@ -133,14 +133,16 @@ versions and the build is meant to be reproducible:
 ```console
 rustup toolchain install 1.98.1 --profile minimal
 cargo install wasm-tools --version 1.259.0 --locked
-./build.sh
+../provider-workflows/build.sh
 ```
 
-`build.sh` is a self-contained port of dekopon's `examples/providers/build-component.sh`. It pins
-`rustc` and `wasm-tools` exactly, normalizes `-Cmetadata`, remaps the source root, `CARGO_HOME`, and
-the sysroot out of the output, builds with `-Ccodegen-units=1`, and then fails if any local path
-survived into the component. It keeps the `dekopon-provider-repro-v1` metadata domain the in-tree
-build used, so a component built here is byte-identical to the one dekopon used to ship.
+`../provider-workflows/build.sh` is the shared build every Dekopon provider uses
+([`dekopon-agents/provider-workflows`](https://github.com/dekopon-agents/provider-workflows)). It
+pins `rustc` and `wasm-tools` exactly, normalizes `-Cmetadata`, remaps the source root,
+`CARGO_HOME`, and the sysroot out of the output, builds with `-Ccodegen-units=1`, and then fails if
+any local path survived into the component. It keeps the `dekopon-provider-repro-v1` metadata
+domain the in-tree build used, so a component built here is byte-identical to the one dekopon used
+to ship.
 
 Native checks must not see `rustflags`; the wasm ones must:
 
@@ -151,10 +153,10 @@ RUSTFLAGS="$(cat rustflags)" cargo check --locked --target wasm32-unknown-unknow
 ```
 
 The cfg in [`rustflags`](rustflags) cannot be declared in `Cargo.toml`, and a local
-`.cargo/config.toml` would be ignored during the real build — `build.sh` sets
+`.cargo/config.toml` would be ignored during the real build — `../provider-workflows/build.sh` sets
 `CARGO_ENCODED_RUSTFLAGS`, which outranks `target.<triple>.rustflags` entirely. Without it
-`getrandom 0.4` stops the compile with its `wasm_js` error. `build.sh` and CI both read that one
-file, so they cannot skew.
+`getrandom 0.4` stops the compile with its `wasm_js` error. `../provider-workflows/build.sh` and CI
+both read that one file, so they cannot skew.
 
 Verify the import surface:
 
@@ -185,8 +187,8 @@ Two suites, split because one of them needs an artifact the other one builds.
 
 ```console
 cargo test --lib              # unit tests; no component required
-./build.sh
-cargo test --test integration # runs the component
+../provider-workflows/build.sh
+DEKOPON_PROVIDER_COMPONENT=$PWD/turso-sql-provider.wasm cargo test --test integration
 cargo bench                   # timings; not run in CI
 ```
 
