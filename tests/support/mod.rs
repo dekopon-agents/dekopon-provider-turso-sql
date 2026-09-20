@@ -3,7 +3,11 @@
 //! Included rather than imported: `tests/` files are separate crates, and this crate is a
 //! `cdylib` with no `rlib`, so there is nothing to hang a shared module off.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use dekopon_provider_sdk_testkit::{FakeBroker, StorageAccess, StorageInterface};
 
@@ -21,13 +25,25 @@ pub fn component() -> PathBuf {
     path
 }
 
-/// A cache directory shared by every test in the process.
+/// A private compiled-component directory for each independently built broker.
 ///
-/// Cranelift on an 11 MB component is the whole of a cold start, and it is otherwise paid once per
-/// `FakeBroker`. Content-addressed, so sharing it across tests is safe.
-pub fn compile_cache() -> PathBuf {
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/testkit-compile-cache");
-    std::fs::create_dir_all(&directory).expect("compile cache directory");
+/// SDK 0.18 refuses concurrent publishers even when their component bytes match. Keep tests
+/// parallel without sharing cold caches; directories live under target until build cleanup,
+/// so no mapped artifact is removed while its broker is alive.
+fn compile_cache() -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/testkit-compile-cache");
+    std::fs::create_dir_all(&root).expect("compile cache root");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock after Unix epoch")
+        .as_nanos();
+    let directory = root.join(format!(
+        "broker-{}-{nonce}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&directory).expect("private compile cache directory");
     directory
 }
 
