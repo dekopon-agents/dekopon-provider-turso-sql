@@ -2,7 +2,7 @@
 
 [package]
 name = "dekopon-turso-sql-provider"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
@@ -19,8 +19,8 @@ crate-type = ["cdylib"]
 # fetches the WIT from off this resolved version. These were pinned by rev only because
 # `dekopon-provider-storage` was added after the v0.9.0 tag and had not been published yet; a rev
 # pin resolves against a branch that can be deleted and leaves nothing on crates.io to audit.
-dekopon-provider-sdk = "=0.15.0"
-dekopon-provider-storage = { version = "=0.15.0", default-features = false, features = ["durable-files"] }
+dekopon-provider-sdk = "=0.18.0"
+dekopon-provider-storage = { version = "=0.18.0", default-features = false, features = ["durable-files"] }
 serde_json = "1.0.151"
 wit-bindgen = { version = "0.62.0", default-features = false, features = ["macros", "realloc"] }
 
@@ -38,7 +38,7 @@ getrandom04 = { package = "getrandom", version = "0.4" }
 [dev-dependencies]
 # Pinned exactly, and to the same version as the two dependencies above, for the same reason: the
 # three are published together from one dekopon workspace and must not skew.
-dekopon-provider-sdk-testkit = "=0.15.0"
+dekopon-provider-sdk-testkit = "=0.18.0"
 divan = "0.1.21"
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
 
