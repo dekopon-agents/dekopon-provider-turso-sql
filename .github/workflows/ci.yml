@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   ci:
-    uses: dekopon-agents/provider-workflows/.github/workflows/ci.yml@4cb9276ca166bee05c04e4c40ad9bca4b1f1065c # v3
+    uses: dekopon-agents/provider-workflows/.github/workflows/ci.yml@c8404236c18bcff3e089677e99ec3075d14b5679 # v4
