@@ -43,8 +43,6 @@ pub struct Trace {
     pub sync: u64,
     pub truncate: u64,
     pub size: u64,
-    pub lock: u64,
-    pub unlock: u64,
     pub remove: u64,
     pub stat: u64,
     pub random: u64,
@@ -196,11 +194,7 @@ impl IO for DekoponIo {
             .write(!read_only)
             .create(!read_only && flags.contains(OpenFlags::Create));
         let file = df::open(path, options).map_err(map_err)?;
-        Ok(Arc::new(DekoponFile {
-            file,
-            level: Cell::new(df::LockLevel::None),
-            no_lock: flags.contains(OpenFlags::NoLock) || read_only,
-        }))
+        Ok(Arc::new(DekoponFile { file }))
     }
 
     fn remove_file(&self, path: &str) -> Result<()> {
@@ -253,69 +247,19 @@ impl IO for DekoponIo {
 
 pub struct DekoponFile {
     file: df::File,
-    level: Cell<df::LockLevel>,
-    no_lock: bool,
 }
 
 // SAFETY: as for `DekoponIo`.
 unsafe impl Send for DekoponFile {}
 unsafe impl Sync for DekoponFile {}
 
-const LADDER: [df::LockLevel; 5] = [
-    df::LockLevel::None,
-    df::LockLevel::Shared,
-    df::LockLevel::Reserved,
-    df::LockLevel::Pending,
-    df::LockLevel::Exclusive,
-];
-
-impl DekoponFile {
-    /// Walks the host's five-level ladder one rung at a time. Turso's own lock
-    /// surface is two-state, and the host rejects a skipped promotion, so the
-    /// intermediate rungs are this adapter's job.
-    fn promote_to(&self, target: df::LockLevel) -> Result<()> {
-        let current = LADDER
-            .iter()
-            .position(|level| *level == self.level.get())
-            .expect("lock level is in the ladder");
-        let wanted = LADDER
-            .iter()
-            .position(|level| *level == target)
-            .expect("lock level is in the ladder");
-        if wanted < current {
-            bump(|trace| trace.unlock += 1);
-            self.file.unlock(target).map_err(map_err)?;
-            self.level.set(target);
-            return Ok(());
-        }
-        for level in LADDER.iter().take(wanted + 1).skip(current + 1) {
-            bump(|trace| trace.lock += 1);
-            self.file.lock(*level).map_err(map_err)?;
-            self.level.set(*level);
-        }
-        Ok(())
-    }
-}
-
 impl File for DekoponFile {
-    fn lock_file(&self, exclusive: bool) -> Result<()> {
-        if self.no_lock {
-            return Ok(());
-        }
-        self.promote_to(if exclusive {
-            df::LockLevel::Exclusive
-        } else {
-            df::LockLevel::Shared
-        })
+    // durable-files has no lock operation; handles in one invocation never contend.
+    fn lock_file(&self, _exclusive: bool) -> Result<()> {
+        Ok(())
     }
 
     fn unlock_file(&self) -> Result<()> {
-        if self.no_lock || self.level.get() == df::LockLevel::None {
-            return Ok(());
-        }
-        bump(|trace| trace.unlock += 1);
-        self.file.unlock(df::LockLevel::None).map_err(map_err)?;
-        self.level.set(df::LockLevel::None);
         Ok(())
     }
 

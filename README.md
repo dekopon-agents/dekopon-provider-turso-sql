@@ -70,11 +70,9 @@ hashmap — is selected unconditionally. `IO::supports_shared_wal_coordination` 
 pinned to `false` here, and `open_file` refuses any `-shm`/`-tshm` name outright, so an upstream
 change cannot silently introduce a sidecar this adapter does not maintain.
 
-Consequently the host's five-level lock ladder is **available but unused**. Turso's own lock surface
-is two-state, `turso_core` never calls `File::lock_file`, and no `durable-files` I/O path consults
-lock state. `lock`, `unlock`, and `check-reserved-lock` are called zero times in normal operation.
-The adapter still walks the ladder one rung at a time when the engine does ask, because the host
-rejects a skipped promotion.
+`durable-files` has no lock operation, and `turso_core` never calls `File::lock_file` on this
+target, so the adapter's `lock_file` and `unlock_file` succeed without a host call. The component
+imports no lock function and loads on `dekopon:storage` 0.1.0 and 0.1.1 hosts alike.
 
 Durability is the host call, not the guest's `sync` and not the invocation. Each `write-at`,
 `truncate`, and `remove` is applied as it is made, and a failed invocation is not rolled back —
@@ -208,9 +206,6 @@ The load-bearing one is `the_write_ahead_log_is_truncated_before_each_invocation
 twenty times and then reads, which an un-truncated log cannot survive. If you are changing `exec`,
 delete the `PRAGMA wal_checkpoint(TRUNCATE)` line and confirm that test goes red before trusting
 it — a WAL regression is silent until the namespace is already unreadable.
-
-`the_lock_ladder_is_never_walked` pins the claim above that `lock` and `unlock` are called zero
-times. An engine bump that starts locking turns it red, which is the intended way to find out.
 
 ## The fork is not optional, and it is coupled to this crate
 
