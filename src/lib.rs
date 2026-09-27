@@ -7,8 +7,7 @@
 //! imports that interface and nothing else.
 //!
 //! Turso is WAL-only; it does not implement a rollback journal and never
-//! requests shared memory on this target, so the host's five-level lock ladder
-//! is available but unused. The database and its write-ahead log are two
+//! requests shared memory on this target. The database and its write-ahead log are two
 //! ordinary durable files, written through per host call: the host has no
 //! invocation rollback, so an invocation that dies partway leaves behind
 //! whatever it had already written.
@@ -180,8 +179,6 @@ fn exec(input: Value) -> Result<Value, ProviderError> {
                 "sync": trace.sync,
                 "truncate": trace.truncate,
                 "size": trace.size,
-                "lock": trace.lock,
-                "unlock": trace.unlock,
                 "remove": trace.remove,
                 "stat": trace.stat,
                 "randomBytes": trace.random,

@@ -264,36 +264,6 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
     assert_eq!(rows(&output, 0)[0], json!([1]), "{output}");
 }
 
-/// Pins the README's claim that the host's five-level lock ladder is available but unused.
-///
-/// `turso_core` never calls `File::lock_file` on this target, because its shared-memory WAL
-/// backend is compiled out on `wasm32`. If a future engine bump starts locking, this goes red and
-/// the coarse-lock claim in the README needs revisiting rather than quietly becoming false.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_lock_ladder_is_never_walked() {
-    let broker = broker().await;
-
-    let output = broker
-        .invoke(
-            "turso.exec",
-            exec(&[
-                "CREATE TABLE note(id INTEGER PRIMARY KEY, body TEXT)",
-                "INSERT INTO note(body) VALUES('first')",
-                "SELECT * FROM note",
-            ]),
-        )
-        .await
-        .expect("a read-write batch runs");
-
-    let calls = &output["storage"]["hostCalls"];
-    assert_eq!(calls["lock"], json!(0), "{output}");
-    assert_eq!(calls["unlock"], json!(0), "{output}");
-    // The interesting counters are non-zero, so the zeroes above are not an empty trace.
-    assert_ne!(calls["open"], json!(0), "{output}");
-    assert_ne!(calls["readAt"], json!(0), "{output}");
-    assert_ne!(calls["writeAt"], json!(0), "{output}");
-}
-
 /// The cheap regression gate that runs on every CI run, in place of the benchmarks.
 ///
 /// Host calls cross the component boundary, so this is the per-row cost that matters. Note it is
