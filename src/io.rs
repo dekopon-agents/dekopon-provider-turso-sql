@@ -254,7 +254,8 @@ unsafe impl Send for DekoponFile {}
 unsafe impl Sync for DekoponFile {}
 
 impl File for DekoponFile {
-    // durable-files has no lock operation; handles in one invocation never contend.
+    // No host call: turso_core never calls this on wasm32, and the broker's namespace lease already
+    // serializes invocations on one database.
     fn lock_file(&self, _exclusive: bool) -> Result<()> {
         Ok(())
     }
