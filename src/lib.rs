@@ -31,8 +31,17 @@ const MAX_STDIN_BYTES: u64 = 1024 * 1024;
     after_help = "One argument is one statement. `turso -` runs one piped statement. Wrap bulk writes in BEGIN/COMMIT."
 )]
 pub struct Args {
-    #[arg(value_name = "STATEMENT", required = true)]
+    #[arg(value_name = "STATEMENT", required = true, allow_hyphen_values = true, trailing_var_arg = true, value_parser = sql_argument)]
     statements: Vec<String>,
+}
+
+fn sql_argument(sql: &str) -> Result<String, String> {
+    // Keep option-like arguments as usage errors (including SDK conformance's
+    // invalid-option probe). A line comment with a space is unambiguously SQL.
+    if sql.starts_with("--") && sql.as_bytes().get(2).is_some_and(u8::is_ascii_alphabetic) {
+        return Err("option-like SQL must follow the `--` separator".to_owned());
+    }
+    Ok(sql.to_owned())
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -149,12 +158,29 @@ fn exec(input: ExecInput, out: &mut Stdout) -> Result<(), ExecError> {
         &format!("PRAGMA cache_size = {CACHE_PAGES}"),
         None,
     )?;
-    write(out, b"{\"results\":[")?;
-    for (index, sql) in statements.iter().enumerate() {
-        if index != 0 {
-            write(out, b",")?;
+    let streamed = (|| {
+        write(out, b"{\"results\":[")?;
+        for (index, sql) in statements.iter().enumerate() {
+            if index != 0 {
+                write(out, b",")?;
+            }
+            run(&connection, &engine, sql, Some(out))?;
         }
-        run(&connection, &engine, sql, Some(out))?;
+        Ok::<(), ExecError>(())
+    })();
+    if let Err(error) = streamed {
+        // A closed reader stops SQL/output immediately, but previously committed
+        // WAL frames still need truncating. Preserve the stdout failure (141)
+        // even if checkpointing itself fails. SQL failures keep their old path.
+        if error.code.as_str() == "output" {
+            let _ = run(
+                &connection,
+                &engine,
+                "PRAGMA wal_checkpoint(TRUNCATE)",
+                None,
+            );
+        }
+        return Err(error);
     }
     // Without this checkpoint, the WAL eventually exceeds the host read quota and
     // permanently renders even SELECT unusable after a series of writes.

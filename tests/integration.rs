@@ -166,6 +166,37 @@ async fn the_write_ahead_log_is_truncated_before_each_invocation_ends() {
     );
 }
 
+/// A downstream close must not strand committed WAL frames. Without the closing
+/// checkpoint, eight implicit commits exceed the host's 256 KiB read ceiling.
+#[tokio::test(flavor = "multi_thread")]
+async fn downstream_close_still_checkpoints_written_rows() {
+    let broker = broker().await;
+    let mut sql = vec!["CREATE TABLE note(body TEXT)".to_owned()];
+    sql.extend((0..8).map(|n| format!("INSERT INTO note(body) VALUES('row-{n}')")));
+    // Larger than pipe buffers; the reader closes after the small write
+    // receipts, while the large SELECT streams, not before the inserts.
+    sql.push("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n<12) SELECT hex(zeroblob(800000)) FROM t".into());
+    sql.push("INSERT INTO note(body) VALUES('must-not-run-after-close')".into());
+    let error = broker
+        .invoke_close_stdout_after("turso.exec", json!({"statements": sql}), 2048)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.provider_failure().map(|(status, _)| status),
+        Some(141),
+        "{error}"
+    );
+    let read = broker
+        .invoke("turso.exec", exec(&["SELECT count(*) FROM note"]))
+        .await
+        .expect("early close must not strand a WAL larger than the read quota");
+    assert_eq!(
+        rows(&read, 0)[0],
+        json!([8]),
+        "{read}: no statement after the closed stream ran"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn vacuum_is_refused_with_the_provider_s_own_code() {
     let broker = broker().await;
@@ -242,6 +273,19 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
         panic!("empty argv is a usage error: {empty:?}");
     };
     assert_eq!(status, 2);
+
+    let comment = broker
+        .run_command("turso", &["-- comment".to_owned()], false)
+        .await
+        .expect("SQL comment argument");
+    let CommandRunOutcome::Proposed {
+        capability, input, ..
+    } = comment
+    else {
+        panic!("SQL starting with -- is a raw statement: {comment:?}");
+    };
+    assert_eq!(capability.as_str(), "turso.exec");
+    assert_eq!(input, json!({"statements": ["-- comment"]}));
 
     let missing_pipe = broker
         .run_command("turso", &["-".to_owned()], false)

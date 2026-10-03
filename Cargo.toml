@@ -18,7 +18,7 @@ clap = { version = "=4.6.6", features = ["derive"] }
 schemars = "=1.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
 
 # dekopon-agents/turso, branch `dekopon`. The fork carries only what
 # wasm32-unknown-unknown needs; see that commit for the upstreamable split.
@@ -32,11 +32,11 @@ getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
 
 [dev-dependencies]
-dekopon-provider-sdk-testkit = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
-dekopon-broker-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
-dekopon-capability = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
-dekopon-core = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
-dekopon-storage-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-provider-sdk-testkit = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-broker-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-capability = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-core = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-storage-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
 tempfile = "3"
 divan = "0.1.21"
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
@@ -45,9 +45,8 @@ tokio = { version = "1", default-features = false, features = ["macros", "rt-mul
 name = "exec"
 harness = false
 
-# Wasmtime and Cranelift compile the 11 MB component on every `FakeBroker`, and an unoptimised
-# Cranelift takes about eighty seconds to do it. Optimising dependencies — but not this crate,
-# which stays debuggable — turns the integration suite from eleven minutes into something anyone
-# will actually run. `build.sh` builds `--release`, so none of this reaches the shipped component.
+# Optimize test-time Wasmtime/Cranelift dependencies, not this crate. The
+# storage-backed fixture caches one registry per test binary. `build.sh` builds
+# release, so these dev settings do not reach the shipped component.
 [profile.dev.package."*"]
 opt-level = 2

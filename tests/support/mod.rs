@@ -169,6 +169,26 @@ impl Broker {
         input: Value,
         stdin: Option<&[u8]>,
     ) -> Result<Value, TestError> {
+        self.invoke_inner(capability, input, stdin, None).await
+    }
+    /// Storage-backed equivalent of the SDK testkit's `close_stdout_after`: use
+    /// its bounded reader/early-drop strategy but keep the explicit storage grant.
+    pub async fn invoke_close_stdout_after(
+        &self,
+        capability: &str,
+        input: Value,
+        bytes: usize,
+    ) -> Result<Value, TestError> {
+        self.invoke_inner(capability, input, None, Some(bytes))
+            .await
+    }
+    async fn invoke_inner(
+        &self,
+        capability: &str,
+        input: Value,
+        stdin: Option<&[u8]>,
+        close_after: Option<usize>,
+    ) -> Result<Value, TestError> {
         let capability: CapabilityId = capability.parse().map_err(host)?;
         let invocation: InvocationId = format!(
             "turso-test-{}",
@@ -227,14 +247,22 @@ impl Broker {
             )
             .map_err(host)?;
         let (writer, reader) = std::os::unix::net::UnixStream::pair().map_err(host)?;
+        let (ready, started) = std::sync::mpsc::sync_channel(0);
         let captured = std::thread::spawn(move || {
             use std::io::Read as _;
+            if close_after == Some(0) {
+                drop(reader);
+                let _ = ready.send(());
+                return Ok::<_, std::io::Error>(Vec::new());
+            }
+            let _ = ready.send(());
             let mut bytes = Vec::new();
             reader
-                .take(16 * 1024 * 1024 + 1)
+                .take(close_after.unwrap_or(16 * 1024 * 1024 + 1) as u64)
                 .read_to_end(&mut bytes)
                 .map(|_| bytes)
         });
+        started.recv().map_err(host)?;
         let (stdin_end, feeder) = if let Some(bytes) = stdin {
             let (host_end, mut send) = std::os::unix::net::UnixStream::pair().map_err(host)?;
             let bytes = bytes.to_vec();
