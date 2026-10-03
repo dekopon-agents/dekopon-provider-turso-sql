@@ -1,4 +1,4 @@
-//! Timings for `turso.exec`, measured through the same fake broker the tests use.
+//! Timings for `turso.exec`, measured through the real storage-authorized broker fixture.
 //!
 //! The question these answer is "is this dog slow?", and the useful shape of the answer is a
 //! fixed/marginal split: an agent workload pays the per-invocation floor — component
@@ -8,10 +8,12 @@
 //! Not run in CI. `cargo bench` after `./build.sh`. The host-call ceiling that *is* enforced on
 //! every CI run lives in `tests/integration.rs`, because a count is a assertion, not a timing.
 
-use std::{path::PathBuf, sync::OnceLock};
-
-use dekopon_provider_sdk_testkit::{FakeBroker, StorageAccess, StorageInterface};
+use std::sync::OnceLock;
+#[path = "../tests/support/mod.rs"]
+#[allow(dead_code)]
+mod support;
 use serde_json::json;
+use support::Broker;
 
 fn main() {
     divan::main();
@@ -27,45 +29,17 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-fn component() -> PathBuf {
-    if let Some(path) = std::env::var_os("DEKOPON_PROVIDER_COMPONENT") {
-        return PathBuf::from(path);
-    }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("turso-sql-provider.wasm");
-    assert!(
-        path.exists(),
-        "{} is missing. Run ./build.sh first.",
-        path.display()
-    );
-    path
+fn broker() -> Broker {
+    runtime().block_on(support::broker())
 }
 
-fn compile_cache() -> PathBuf {
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/testkit-compile-cache");
-    std::fs::create_dir_all(&directory).expect("compile cache directory");
-    directory
-}
-
-fn broker() -> FakeBroker {
-    runtime().block_on(async {
-        FakeBroker::builder()
-            .component(component())
-            .provider("turso")
-            .storage(StorageInterface::DurableFiles, StorageAccess::ReadWrite)
-            .compile_cache(compile_cache())
-            .build()
-            .await
-            .expect("the turso component loads")
-    })
-}
-
-fn run(broker: &FakeBroker, statements: Vec<String>) {
+fn run(broker: &Broker, statements: Vec<String>) {
     runtime()
         .block_on(broker.invoke("turso.exec", json!({"statements": statements})))
         .expect("statements run");
 }
 
-fn seeded(rows: usize) -> FakeBroker {
+fn seeded(rows: usize) -> Broker {
     let broker = broker();
     let mut statements = vec!["CREATE TABLE note(id INTEGER PRIMARY KEY, body TEXT)".to_owned()];
     if rows > 0 {
@@ -90,7 +64,7 @@ fn inserts(rows: usize) -> Vec<String> {
 /// This is what a broker pays once at startup, not per invocation — reported separately so it
 /// never gets folded into a per-call number.
 #[divan::bench(sample_count = 5, sample_size = 1)]
-fn instantiate() -> FakeBroker {
+fn instantiate() -> Broker {
     broker()
 }
 

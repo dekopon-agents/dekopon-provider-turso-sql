@@ -10,7 +10,9 @@
 
 mod support;
 
-use dekopon_provider_sdk_testkit::CommandRunOutcome;
+use dekopon_provider_sdk::{CommandRunOutcome, provider};
+use dekopon_provider_sdk_testkit::conformance;
+use dekopon_turso_sql_provider::TursoSqlProvider;
 use serde_json::{Value, json};
 use support::broker;
 
@@ -157,7 +159,7 @@ async fn the_write_ahead_log_is_truncated_before_each_invocation_ends() {
 
     // Corroboration on disk: the namespace holds the database and its log, and their combined
     // size stays far below what twenty un-truncated 64 KiB frames would have produced.
-    let bytes = data_bytes(broker.storage_root());
+    let bytes = broker.storage_bytes_added();
     assert!(
         bytes < 20 * 64 * 1024,
         "durable bytes grew to {bytes}, which is WAL accumulation"
@@ -170,9 +172,10 @@ async fn vacuum_is_refused_with_the_provider_s_own_code() {
 
     for sql in ["VACUUM", "VACUUM INTO 'copy.db'"] {
         let error = broker.invoke("turso.exec", exec(&[sql])).await.unwrap_err();
-        assert_eq!(
-            error.provider_failure().map(|(code, _)| code),
-            Some("refused"),
+        let (status, message) = error.provider_failure().expect("provider refusal");
+        assert_eq!(status, 1, "{sql}: {error}");
+        assert!(
+            message.contains("vacuum is not permitted"),
             "{sql}: {error}"
         );
     }
@@ -187,10 +190,10 @@ async fn malformed_sql_surfaces_the_engine_s_own_message() {
         .await
         .expect_err("a parse error is a failure");
 
-    let (code, message) = error
+    let (status, message) = error
         .provider_failure()
         .unwrap_or_else(|| panic!("expected a provider failure, got {error}"));
-    assert_eq!(code, "prepare", "{message}");
+    assert_eq!(status, 1, "{message}");
     // The engine's own diagnostic, not a generic one: a caller has to be able to fix the SQL.
     assert!(!message.is_empty(), "{message}");
 }
@@ -216,7 +219,7 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
     let broker = broker().await;
 
     let help = broker
-        .run_command("turso", &["--help".to_owned()], None)
+        .run_command("turso", &["--help".to_owned()], false)
         .await
         .expect("the component exports run-command");
     let CommandRunOutcome::Rendered {
@@ -229,10 +232,10 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
     };
     assert_eq!(status, 0, "{stdout}");
     assert!(stderr.is_empty(), "{stderr}");
-    assert!(stdout.starts_with("Usage: turso"), "{stdout}");
+    assert!(stdout.contains("Usage: turso <STATEMENT>..."), "{stdout}");
 
     let empty = broker
-        .run_command("turso", &[], None)
+        .run_command("turso", &[], false)
         .await
         .expect("empty argv is answered, not trapped");
     let CommandRunOutcome::Rendered { status, .. } = empty else {
@@ -240,8 +243,18 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
     };
     assert_eq!(status, 2);
 
+    let missing_pipe = broker
+        .run_command("turso", &["-".to_owned()], false)
+        .await
+        .expect("usage refusal");
+    let CommandRunOutcome::Failed { error } = missing_pipe else {
+        panic!("missing pipe must not propose: {missing_pipe:?}");
+    };
+    assert_eq!(error.code, "usage");
+    assert!(error.message.contains("nothing was piped in"));
+
     let piped = broker
-        .run_command("turso", &["-".to_owned()], Some("SELECT 1"))
+        .run_command("turso", &["-".to_owned()], true)
         .await
         .expect("a piped statement is answered");
     let CommandRunOutcome::Proposed {
@@ -253,15 +266,71 @@ async fn the_command_word_renders_help_proposes_and_reads_a_pipe() {
         panic!("a piped statement becomes a proposal: {piped:?}");
     };
     assert_eq!(capability.as_str(), "turso.exec");
-    assert_eq!(input, json!({"statements": ["SELECT 1"]}));
+    assert_eq!(input, json!({"statements": [], "stdin_statement": true}));
 
     // The proposal is authorized on the ordinary path; running it proves the word and the
     // capability agree about the input shape.
     let output = broker
-        .invoke(capability.as_str(), input)
+        .invoke_with_stdin(capability.as_str(), input, Some(b"SELECT 17"))
         .await
         .expect("the word's own proposal invokes");
-    assert_eq!(rows(&output, 0)[0], json!([1]), "{output}");
+    assert_eq!(rows(&output, 0)[0], json!([17]), "{output}");
+    // The proposal carries only a marker; the statement comes from the later pipe.
+    // Empty pipe is rejected before opening the database.
+    let bytes_before = broker.storage_bytes_added();
+    let proposal = json!({"statements": [], "stdin_statement": true});
+    let error = broker
+        .invoke_with_stdin("turso.exec", proposal, Some(b" \n "))
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .provider_failure()
+            .is_some_and(|(status, stderr)| status == 2 && stderr.contains("nothing was piped in")),
+        "{error}"
+    );
+    assert_eq!(
+        broker.storage_bytes_added(),
+        bytes_before,
+        "empty pipe did no storage work"
+    );
+    let error = broker
+        .invoke_with_stdin(
+            "turso.exec",
+            json!({"statements": [], "stdin_statement": true}),
+            Some(b""),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .provider_failure()
+            .is_some_and(|(status, _)| status == 2)
+    );
+    assert_eq!(
+        broker.storage_bytes_added(),
+        bytes_before,
+        "zero-byte pipe did no storage work"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn component_registry_is_compiled_once_per_test_binary() {
+    let _broker = broker().await;
+    assert_eq!(support::registry_loads(), 1);
+}
+
+#[test]
+fn actual_component_conforms_to_typed_storage_contract() {
+    conformance::<TursoSqlProvider>(support::component())
+        .expect("typed manifest, help and imports agree with the real component");
+    let manifest = provider::manifest::<TursoSqlProvider>().expect("typed manifest");
+    assert_eq!(manifest.capabilities.len(), 1);
+    assert_eq!(manifest.capabilities[0].id.as_str(), "turso.exec");
+    assert_eq!(
+        manifest.capabilities[0].effect,
+        dekopon_provider_sdk::EffectKind::LocalWrite
+    );
 }
 
 /// The cheap regression gate that runs on every CI run, in place of the benchmarks.
@@ -303,7 +372,7 @@ async fn host_calls_stay_near_two_per_inserted_row() {
     );
 }
 
-async fn insert_rows(broker: &dekopon_provider_sdk_testkit::FakeBroker, rows: usize) -> Value {
+async fn insert_rows(broker: &support::Broker, rows: usize) -> Value {
     let statements: Vec<String> = (0..rows)
         .map(|index| format!("INSERT INTO note(body) VALUES('row-{index}')"))
         .collect();
@@ -374,7 +443,7 @@ async fn an_oversized_batch_is_refused_and_leaves_the_namespace_unreadable() {
 
     // What the batch did commit before the refusal is still on disk — there is no rollback — and
     // it is an order of magnitude more than the one surviving row needs.
-    let bytes = data_bytes(broker.storage_root());
+    let bytes = broker.storage_bytes_added();
     assert!(bytes > 8 * 1024 * 1024, "only {bytes} durable bytes remain");
 
     // And that is what makes the namespace terminal: the log now exceeds
@@ -420,27 +489,4 @@ async fn one_explicit_transaction_fits_a_bulk_load_that_implicit_commits_cannot(
         .await
         .expect("the bulk load committed");
     assert_eq!(rows(&output, 0)[0], json!([1000]), "{output}");
-}
-
-/// Sums every durable file in the namespace. Path components are HMAC tokens, so this walks
-/// rather than naming `main.db` and `main.db-wal`.
-fn data_bytes(root: &std::path::Path) -> u64 {
-    fn visit(path: &std::path::Path, total: &mut u64) {
-        let Ok(entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            if metadata.is_dir() {
-                visit(&entry.path(), total);
-            } else {
-                *total += metadata.len();
-            }
-        }
-    }
-    let mut total = 0;
-    visit(&root.join("namespaces"), &mut total);
-    total
 }

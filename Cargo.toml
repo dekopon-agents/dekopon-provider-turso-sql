@@ -11,18 +11,14 @@ repository = "https://github.com/dekopon-agents/dekopon-provider-turso-sql"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Plain crates.io versions, pinned exactly and together so the two cannot skew: they are published
-# from one dekopon workspace at one version, and the CI mirror check derives the dekopon tag it
-# fetches the WIT from off this resolved version. These were pinned by rev only because
-# `dekopon-provider-storage` was added after the v0.9.0 tag and had not been published yet; a rev
-# pin resolves against a branch that can be deleted and leaves nothing on crates.io to audit.
-dekopon-provider-sdk = "=0.18.0"
-dekopon-provider-storage = { version = "=0.18.0", default-features = false, features = ["durable-files"] }
+clap = { version = "=4.6.6", features = ["derive"] }
+schemars = "=1.2.2"
+serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-wit-bindgen = { version = "0.62.0", default-features = false, features = ["macros", "realloc"] }
+dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
 
 # dekopon-agents/turso, branch `dekopon`. The fork carries only what
 # wasm32-unknown-unknown needs; see that commit for the upstreamable split.
@@ -36,11 +32,14 @@ getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
 
 [dev-dependencies]
-# Pinned exactly, and to the same version as the two dependencies above, for the same reason: the
-# three are published together from one dekopon workspace and must not skew.
-dekopon-provider-sdk-testkit = "=0.18.0"
+dekopon-provider-sdk-testkit = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-broker-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-capability = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-core = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+dekopon-storage-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "f261fbcaaff80fa3ba14f1da90fbb47444b1c1b7" }
+tempfile = "3"
 divan = "0.1.21"
-tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 
 [[bench]]
 name = "exec"

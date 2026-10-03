@@ -5,12 +5,13 @@ SQLite-compatible SQL inside a Wasm component, backed by broker-owned durable fi
 The engine is [`turso_core`](https://github.com/tursodatabase/turso) — a pure-Rust SQLite rewrite —
 compiled to `wasm32-unknown-unknown` from the [`dekopon-agents/turso`](https://github.com/dekopon-agents/turso)
 fork. It reaches storage, entropy, and both clocks only through
-`dekopon:storage/durable-files@0.1.0`. The generated component imports that interface and nothing
-else: no WASI, no JS interop, no C.
+`dekopon:storage/durable-files@0.1.1`. The component also imports
+`dekopon:stdio/streams@0.1.0` for invocation-time stdin and streamed stdout; no WASI,
+JS interop, or C.
 
 | Capability | Effect | Behavior |
 |---|---|---|
-| `turso.exec` | `local-write` | Executes an ordered array of SQL statements against the namespace database and returns each statement's rows plus the host calls the engine produced. |
+| `turso.exec` | `local-write` | Executes an ordered array of SQL statements against the namespace database and streams JSON containing each statement's rows and host-call counts to stdout. |
 
 ```json
 {"statements":["CREATE TABLE IF NOT EXISTS note(id INTEGER PRIMARY KEY, body TEXT)","INSERT INTO note(body) VALUES('first')","SELECT id, body FROM note"]}
@@ -51,7 +52,9 @@ turso                 # the usage page on stderr, exit 2
 echo 'SELECT 1' | turso -
 ```
 
-`turso -` runs *one* statement, the piped value verbatim. It is not a script runner: `prepare`
+`turso -` proposes only a stdin marker; after broker authorization it reads one bounded piped
+statement at invocation, rejecting an empty pipe before opening the database. It runs *one*
+statement, the piped value verbatim. It is not a script runner: `prepare`
 takes a single statement, and splitting a multi-statement file here would need a SQL-aware
 splitter — one that knows a semicolon inside a string literal is not a terminator — and would
 otherwise silently run only the first statement of what was piped. Send a script as one argument

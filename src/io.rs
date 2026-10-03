@@ -18,7 +18,30 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use dekopon_provider_storage::durable_files as df;
+use dekopon_provider_sdk::provider::{DurableFiles, Storage, durable_files as df};
+thread_local! {
+    static STORAGE: RefCell<Option<Storage<DurableFiles>>> = const { RefCell::new(None) };
+}
+pub fn with_storage<T>(storage: Storage<DurableFiles>, run: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            STORAGE.with(|cell| *cell.borrow_mut() = None);
+        }
+    }
+    STORAGE.with(|cell| *cell.borrow_mut() = Some(storage));
+    let _reset = Reset;
+    run()
+}
+fn storage<T>(call: impl FnOnce(&Storage<DurableFiles>) -> T) -> T {
+    STORAGE.with(|cell| {
+        call(
+            cell.borrow()
+                .as_ref()
+                .expect("authorized storage installed"),
+        )
+    })
+}
 use turso_core::io::FileSyncType;
 use turso_core::{
     Buffer, Clock, Completion, CompletionError, File, IO, LimboError, MonotonicInstant, OpenFlags,
@@ -103,7 +126,7 @@ fn fill_entropy(dest: &mut [u8]) -> usize {
     while filled < dest.len() {
         let want = (dest.len() - filled).min(MAX_ENTROPY_PER_CALL);
         bump(|trace| trace.random += 1);
-        let Ok(bytes) = df::random_bytes(want as u32) else {
+        let Ok(bytes) = storage(|df| df.random_bytes(want as u32)) else {
             return filled;
         };
         let taken = bytes.len().min(want);
@@ -121,13 +144,13 @@ fn fill_entropy(dest: &mut [u8]) -> usize {
 #[unsafe(no_mangle)]
 extern "Rust" fn __dekopon_monotonic_time_ns() -> u64 {
     bump(|trace| trace.monotonic += 1);
-    df::monotonic_time_ns().unwrap_or(0)
+    storage(|df| df.monotonic_time_ns()).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
 extern "Rust" fn __dekopon_wall_time_ms() -> u64 {
     bump(|trace| trace.wall += 1);
-    df::wall_time_ms().unwrap_or(0)
+    storage(|df| df.wall_time_ms()).unwrap_or(0)
 }
 
 // ---------- IO ----------
@@ -151,7 +174,7 @@ impl DekoponIo {
     pub fn new() -> Self {
         bump(|trace| trace.monotonic += 1);
         Self {
-            base_ns: Cell::new(df::monotonic_time_ns().unwrap_or(0)),
+            base_ns: Cell::new(storage(|df| df.monotonic_time_ns()).unwrap_or(0)),
         }
     }
 }
@@ -159,13 +182,13 @@ impl DekoponIo {
 impl Clock for DekoponIo {
     fn current_time_monotonic(&self) -> MonotonicInstant {
         bump(|trace| trace.monotonic += 1);
-        let now = df::monotonic_time_ns().unwrap_or(0);
+        let now = storage(|df| df.monotonic_time_ns()).unwrap_or(0);
         MonotonicInstant::from_nanos(u128::from(now.saturating_sub(self.base_ns.get())))
     }
 
     fn current_time_wall_clock(&self) -> WallClockInstant {
         bump(|trace| trace.wall += 1);
-        let ms = df::wall_time_ms().unwrap_or(0);
+        let ms = storage(|df| df.wall_time_ms()).unwrap_or(0);
         WallClockInstant {
             secs: (ms / 1000) as i64,
             micros: ((ms % 1000) * 1000) as u32,
@@ -193,13 +216,13 @@ impl IO for DekoponIo {
             .read(true)
             .write(!read_only)
             .create(!read_only && flags.contains(OpenFlags::Create));
-        let file = df::open(path, options).map_err(map_err)?;
+        let file = storage(|df| df.open(path, options)).map_err(map_err)?;
         Ok(Arc::new(DekoponFile { file }))
     }
 
     fn remove_file(&self, path: &str) -> Result<()> {
         bump(|trace| trace.remove += 1);
-        df::remove(path, df::Durability::DataAndMetadata).map_err(map_err)
+        storage(|df| df.remove(path, df::Durability::DataAndMetadata)).map_err(map_err)
     }
 
     /// Keeps the `{db}-tshm` shared-memory path out of the engine entirely.
@@ -233,7 +256,7 @@ impl IO for DekoponIo {
 
     fn file_id(&self, path: &str) -> Result<turso_core::io::FileId> {
         bump(|trace| trace.stat += 1);
-        match df::stat(path) {
+        match storage(|df| df.stat(path)) {
             Ok(Some(stat)) => Ok(turso_core::io::FileId {
                 dev: 0,
                 ino: stat.identity,
