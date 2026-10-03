@@ -2,7 +2,7 @@
 
 [package]
 name = "dekopon-turso-sql-provider"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
@@ -18,7 +18,7 @@ clap = { version = "=4.6.6", features = ["derive"] }
 schemars = "=1.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-provider-sdk = "=0.31.0"
 
 # dekopon-agents/turso, branch `dekopon`. The fork carries only what
 # wasm32-unknown-unknown needs; see that commit for the upstreamable split.
@@ -32,11 +32,11 @@ getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
 
 [dev-dependencies]
-dekopon-provider-sdk-testkit = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
-dekopon-broker-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
-dekopon-capability = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
-dekopon-core = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
-dekopon-storage-host = { git = "https://github.com/dekopon-agents/dekopon", rev = "16c17e8554d7142ba3ebb944930bbfae64bc2db6" }
+dekopon-provider-sdk-testkit = "=0.31.0"
+dekopon-broker-host = "=0.31.0"
+dekopon-capability = "=0.31.0"
+dekopon-core = "=0.31.0"
+dekopon-storage-host = "=0.31.0"
 tempfile = "3"
 divan = "0.1.21"
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
