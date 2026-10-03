@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-10-03
+
+### Changed
+
+- Migrate `turso.exec` to the Dekopon 0.31.0 provider SDK and stdio streaming contract, with
+  authorized piped SQL read at invocation and durable-files storage retained. Checkpoint the WAL
+  even when the output consumer closes early.
+
 ## [0.5.0] - 2026-09-27
 
 ### Removed
