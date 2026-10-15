@@ -17,4 +17,3 @@ dekopon-provider-sdk = "=0.33.0"
 # dekopon-agents/turso, branch `dekopon`. The fork carries only what
 # wasm32-unknown-unknown needs; see that commit for the upstreamable split.
 turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad334991b5bc8cad9806ec2225bcd3593bfa6", default-features = false, features = ["fs", "uuid"] }
-
