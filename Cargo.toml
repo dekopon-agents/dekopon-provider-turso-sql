@@ -29,7 +29,7 @@ turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad3349
 
 # Three getrandom majors are genuinely in the graph (0.2 via aes-gcm, 0.3 via
 # rand 0.9, 0.4 via rand 0.10). Each needs its custom backend registered
-# against the broker's entropy import; see src/io.rs.
+# against the broker's entropy import; see src/component.rs.
 getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
 getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
