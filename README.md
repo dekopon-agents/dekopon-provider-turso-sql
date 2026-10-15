@@ -128,6 +128,15 @@ deployment should carry, so fetch the release asset for the tag you want and sta
 
 ## Building
 
+The default `component` feature builds the `turso.exec` component, including its
+SDK exports and custom entropy registrations. Rust consumers that only need
+`dekopon_turso_sql_provider::io` must set `default-features = false` to avoid
+linking another provider's component entry points or entropy symbols. Such
+consumers supply the clock seams documented in `io` and their own entropy
+registrations when their wasm dependency graph requires them. Use
+`io::with_database` to install authorized storage, open `main.db` with the
+provider's PRAGMAs, and checkpoint its WAL even when SQL/output fails.
+
 Requires the pinned toolchain and `wasm-tools`, because component encoding is not stable across
 versions and the build is meant to be reproducible:
 

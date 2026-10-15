@@ -13,6 +13,10 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["component"]
+component = []
+
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 schemars = "=1.2.2"
