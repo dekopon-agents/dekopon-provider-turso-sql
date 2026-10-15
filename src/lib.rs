@@ -1,8 +1,6 @@
 //! SQLite-compatible SQL backed by broker-owned durable files.
-//! The component is optional for consumers linking only the shared storage adapter.
-pub mod io;
+//! The reusable adapter is in the `dekopon-turso-sql-io` package.
+use dekopon_turso_sql_io as io;
 
-#[cfg(feature = "component")]
 mod component;
-#[cfg(feature = "component")]
 pub use component::{Args, Exec, ExecError, ExecInput, TursoSqlProvider};

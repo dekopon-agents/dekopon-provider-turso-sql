@@ -1,4 +1,5 @@
 [workspace]
+members = ["io"]
 
 [package]
 name = "dekopon-turso-sql-provider"
@@ -13,24 +14,17 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-default = ["component"]
-component = []
-
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 schemars = "=1.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 dekopon-provider-sdk = "=0.33.0"
-
-# dekopon-agents/turso, branch `dekopon`. The fork carries only what
-# wasm32-unknown-unknown needs; see that commit for the upstreamable split.
-turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad334991b5bc8cad9806ec2225bcd3593bfa6", default-features = false, features = ["fs", "uuid"] }
+dekopon-turso-sql-io = { path = "io" }
 
 # Three getrandom majors are genuinely in the graph (0.2 via aes-gcm, 0.3 via
 # rand 0.9, 0.4 via rand 0.10). Each needs its custom backend registered
-# against the broker's entropy import; see src/io.rs.
+# against the broker's entropy import; see src/component.rs.
 getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
 getrandom03 = { package = "getrandom", version = "0.3" }
 getrandom04 = { package = "getrandom", version = "0.4" }
