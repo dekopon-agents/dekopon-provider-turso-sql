@@ -1,0 +1,20 @@
+[package]
+name = "dekopon-turso-sql-io"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "MIT OR Apache-2.0"
+description = "Shared Turso SQL durable-files adapter for Dekopon components"
+repository = "https://github.com/dekopon-agents/dekopon-provider-turso-sql"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+dekopon-provider-sdk = "=0.33.0"
+
+# dekopon-agents/turso, branch `dekopon`. The fork carries only what
+# wasm32-unknown-unknown needs; see that commit for the upstreamable split.
+turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad334991b5bc8cad9806ec2225bcd3593bfa6", default-features = false, features = ["fs", "uuid"] }
+

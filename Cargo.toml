@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["io"]
 
 [package]
 name = "dekopon-turso-sql-provider"
@@ -23,9 +24,7 @@ schemars = "=1.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 dekopon-provider-sdk = "=0.33.0"
-
-# dekopon-agents/turso, branch `dekopon`. The fork carries only what
-# wasm32-unknown-unknown needs; see that commit for the upstreamable split.
+dekopon-turso-sql-io = { path = "io" }
 turso_core = { git = "https://github.com/dekopon-agents/turso", rev = "b4aad334991b5bc8cad9806ec2225bcd3593bfa6", default-features = false, features = ["fs", "uuid"] }
 
 # Three getrandom majors are genuinely in the graph (0.2 via aes-gcm, 0.3 via

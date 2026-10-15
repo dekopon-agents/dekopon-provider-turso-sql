@@ -192,7 +192,7 @@ fn map_err(error: df::StorageError) -> LimboError {
 /// Fills `dest` from the broker's entropy import, one bounded call at a time.
 /// Returns the number of bytes actually written, which is `dest.len()` unless
 /// the invocation's entropy budget ran out.
-pub(crate) fn fill_entropy(dest: &mut [u8]) -> usize {
+pub fn fill_entropy(dest: &mut [u8]) -> usize {
     let mut filled = 0;
     while filled < dest.len() {
         let want = (dest.len() - filled).min(MAX_ENTROPY_PER_CALL);

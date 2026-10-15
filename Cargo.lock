@@ -930,6 +930,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dekopon-turso-sql-io"
+version = "0.6.0"
+dependencies = [
+ "dekopon-provider-sdk",
+ "turso_core",
+]
+
+[[package]]
 name = "dekopon-turso-sql-provider"
 version = "0.6.0"
 dependencies = [
@@ -940,6 +948,7 @@ dependencies = [
  "dekopon-provider-sdk",
  "dekopon-provider-sdk-testkit",
  "dekopon-storage-host",
+ "dekopon-turso-sql-io",
  "divan",
  "getrandom 0.2.17",
  "getrandom 0.3.4",

@@ -129,13 +129,13 @@ deployment should carry, so fetch the release asset for the tag you want and sta
 ## Building
 
 The default `component` feature builds the `turso.exec` component, including its
-SDK exports and custom entropy registrations. Rust consumers that only need
-`dekopon_turso_sql_provider::io` must set `default-features = false` to avoid
-linking another provider's component entry points or entropy symbols. `io` already defines the
-two clock seams the Turso fork declares (see "The fork is not optional"); such consumers add only
-their own entropy registrations when their wasm dependency graph requires them. Use
-`io::with_database` to install authorized storage, open `main.db` with the
-provider's PRAGMAs, and checkpoint its WAL even when SQL/output fails.
+SDK exports and custom entropy registrations. Consumers link the standalone
+`dekopon-turso-sql-io` package (in `io/`) by git revision; it is rlib-only and
+defines neither component exports nor entropy registrations. It defines the two
+clock seams the Turso fork declares. Consumers provide their own entropy
+registrations when their wasm dependency graph requires them. Use
+`dekopon_turso_sql_io::with_database` to install authorized storage, open
+`main.db` with the provider's PRAGMAs, and checkpoint its WAL even when SQL/output fails.
 
 Requires the pinned toolchain and `wasm-tools`, because component encoding is not stable across
 versions and the build is meant to be reproducible:
@@ -226,13 +226,13 @@ it — a WAL regression is silent until the namespace is already unreadable.
 from either side alone:
 
 - The fork **declares** `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` as
-  `unsafe extern "Rust"` in `core/io/clock.rs`. This crate **defines** them in `src/io.rs`. The fork
+  `unsafe extern "Rust"` in `core/io/clock.rs`. The adapter package **defines** them in `io/src/lib.rs`. The fork
   does not link for wasm32 without an embedder supplying both symbols.
 - The fork flips the wasm32 `getrandom` backend to `custom`. This crate registers the custom backend
-  for all three `getrandom` majors in the graph, also in `src/io.rs`.
+  for all three `getrandom` majors in the graph, in `src/component.rs`.
 
 So the pinned `turso_core` rev and this crate's version move together. Bumping the fork without
-checking `src/io.rs` produces a link error at best and a wrong clock at worst.
+checking `io/src/lib.rs` and `src/component.rs` produces a link error at best and a wrong clock at worst.
 
 ## Releases
 
