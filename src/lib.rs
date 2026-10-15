@@ -1,7 +1,7 @@
 //! SQLite-compatible SQL backed by broker-owned durable files. Storage, entropy and
 //! both clocks are reached only through the SDK's durable-files import; stdin and
 //! stdout are broker-owned streams. No WASI or ambient filesystem access.
-mod io;
+pub mod io;
 
 use clap::Parser;
 use dekopon_provider_sdk::provider::{
