@@ -15,8 +15,8 @@
 //!   outright, so an unchunked request returns an error rather than a short
 //!   buffer — which would otherwise leave a caller's buffer silently unfilled.
 //!
-//! Embedders of this adapter must supply the `__dekopon_monotonic_time_ns` and
-//! `__dekopon_wall_time_ms` clock seams required by the patched Turso engine.
+//! This module defines the `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` clock seams
+//! the patched Turso engine declares; an embedder must not define them again.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
