@@ -14,6 +14,9 @@
 //!   `max_entropy_bytes_per_call` (256 bytes) and rejects anything larger
 //!   outright, so an unchunked request returns an error rather than a short
 //!   buffer — which would otherwise leave a caller's buffer silently unfilled.
+//!
+//! This module defines the `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` clock seams
+//! the patched Turso engine declares; an embedder must not define them again.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -44,9 +47,77 @@ fn storage<T>(call: impl FnOnce(&Storage<DurableFiles>) -> T) -> T {
 }
 use turso_core::io::FileSyncType;
 use turso_core::{
-    Buffer, Clock, Completion, CompletionError, File, IO, LimboError, MonotonicInstant, OpenFlags,
-    Result, WallClockInstant,
+    Buffer, Clock, Completion, CompletionError, Connection, Database, File, IO, LimboError,
+    MonotonicInstant, OpenFlags, Result, SqliteDialect, StepResult, WallClockInstant,
 };
+
+/// The fixed namespace database shared by all callers of this adapter.
+pub const DATABASE: &str = "main.db";
+/// The page size used for both providers' database connections.
+pub const PAGE_SIZE: u32 = 65_536;
+/// The per-connection page cache size.
+pub const CACHE_PAGES: u32 = 256;
+
+/// Run SQL with authorized storage and checkpoint the WAL before returning,
+/// including when the caller stops on an output error. On failure, retain the
+/// original error even if checkpointing also fails.
+pub fn with_database<T, E>(
+    storage: Storage<DurableFiles>,
+    error: impl Fn(&'static str, String) -> E,
+    run: impl FnOnce(&Arc<Connection>, &Arc<dyn IO>) -> std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
+    with_storage(storage, || {
+        let engine: Arc<dyn IO> = Arc::new(DekoponIo::new());
+        let database = Database::open_file(Arc::clone(&engine), DATABASE, Arc::new(SqliteDialect))
+            .map_err(|e| error("open", e.to_string()))?;
+        let connection = database
+            .connect()
+            .map_err(|e| error("connect", e.to_string()))?;
+        let result = (|| {
+            checkpoint_sql(
+                &connection,
+                &engine,
+                &format!("PRAGMA page_size = {PAGE_SIZE}"),
+            )
+            .map_err(|(stage, detail)| error(stage, detail))?;
+            checkpoint_sql(
+                &connection,
+                &engine,
+                &format!("PRAGMA cache_size = {CACHE_PAGES}"),
+            )
+            .map_err(|(stage, detail)| error(stage, detail))?;
+            run(&connection, &engine)
+        })();
+        // Turso does not checkpoint automatically. Never strand WAL frames when
+        // stdout closes early or the user's SQL fails after earlier commits.
+        let checkpoint = checkpoint_sql(&connection, &engine, "PRAGMA wal_checkpoint(TRUNCATE)");
+        match result {
+            Err(e) => Err(e),
+            Ok(value) => checkpoint
+                .map(|()| value)
+                .map_err(|(_, detail)| error("checkpoint", detail)),
+        }
+    })
+}
+
+fn checkpoint_sql(
+    connection: &Arc<Connection>,
+    engine: &Arc<dyn IO>,
+    sql: &str,
+) -> std::result::Result<(), (&'static str, String)> {
+    let mut statement = connection
+        .prepare(sql)
+        .map_err(|e| ("prepare", e.to_string()))?;
+    loop {
+        match statement.step().map_err(|e| ("step", e.to_string()))? {
+            StepResult::IO => engine.step().map_err(|e| ("io", e.to_string()))?,
+            StepResult::Done => return Ok(()),
+            StepResult::Interrupt => return Err(("interrupted", sql.to_owned())),
+            StepResult::Busy => return Err(("busy", sql.to_owned())),
+            _ => {}
+        }
+    }
+}
 
 /// The host rejects a `random-bytes` request above this outright.
 const MAX_ENTROPY_PER_CALL: usize = 256;
@@ -121,7 +192,7 @@ fn map_err(error: df::StorageError) -> LimboError {
 /// Fills `dest` from the broker's entropy import, one bounded call at a time.
 /// Returns the number of bytes actually written, which is `dest.len()` unless
 /// the invocation's entropy budget ran out.
-fn fill_entropy(dest: &mut [u8]) -> usize {
+pub(crate) fn fill_entropy(dest: &mut [u8]) -> usize {
     let mut filled = 0;
     while filled < dest.len() {
         let want = (dest.len() - filled).min(MAX_ENTROPY_PER_CALL);
@@ -356,45 +427,5 @@ impl File for DekoponFile {
     fn size(&self) -> Result<u64> {
         bump(|trace| trace.size += 1);
         self.file.size().map_err(map_err)
-    }
-}
-
-// ---------- getrandom backends ----------
-//
-// Three majors are in the graph and each registers its custom backend
-// differently: 0.2 through a macro, 0.3 and 0.4 through a named extern symbol.
-
-fn dekopon_entropy(dest: &mut [u8]) -> std::result::Result<(), getrandom02::Error> {
-    if fill_entropy(dest) == dest.len() {
-        Ok(())
-    } else {
-        Err(getrandom02::Error::UNSUPPORTED)
-    }
-}
-getrandom02::register_custom_getrandom!(dekopon_entropy);
-
-#[unsafe(no_mangle)]
-unsafe extern "Rust" fn __getrandom_v03_custom(
-    dest: *mut u8,
-    len: usize,
-) -> std::result::Result<(), getrandom03::Error> {
-    let slice = unsafe { std::slice::from_raw_parts_mut(dest, len) };
-    if fill_entropy(slice) == len {
-        Ok(())
-    } else {
-        Err(getrandom03::Error::UNSUPPORTED)
-    }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "Rust" fn __getrandom_v04_custom(
-    dest: *mut u8,
-    len: usize,
-) -> std::result::Result<(), getrandom04::Error> {
-    let slice = unsafe { std::slice::from_raw_parts_mut(dest, len) };
-    if fill_entropy(slice) == len {
-        Ok(())
-    } else {
-        Err(getrandom04::Error::UNSUPPORTED)
     }
 }
