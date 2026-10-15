@@ -6,7 +6,9 @@ targets = ["wasm32-unknown-unknown", "x86_64-unknown-linux-gnu"]
 all-features = false
 
 [advisories]
-ignore = []
+ignore = [
+  { id = "RUSTSEC-2024-0449", reason = "unmaintained, not a vulnerability: unsafe-libyaml 0.2.11 reaches the graph only through dekopon-core's serde_yaml_ng 0.10; removable with dekopon#542" },
+]
 
 [licenses]
 version = 2
