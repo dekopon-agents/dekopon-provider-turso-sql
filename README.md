@@ -128,14 +128,16 @@ deployment should carry, so fetch the release asset for the tag you want and sta
 
 ## Building
 
-The default `component` feature builds the `turso.exec` component, including its
-SDK exports and custom entropy registrations. Consumers link the standalone
-`dekopon-turso-sql-io` package (in `io/`) by git revision; it is rlib-only and
-defines neither component exports nor entropy registrations. It defines the two
-clock seams the Turso fork declares. Consumers provide their own entropy
-registrations when their wasm dependency graph requires them. Use
-`dekopon_turso_sql_io::with_database` to install authorized storage, open
-`main.db` with the provider's PRAGMAs, and checkpoint its WAL even when SQL/output fails.
+The provider builds the `turso.exec` component, including its SDK exports and
+custom entropy registrations. Consumers link the `dekopon-turso-sql-io` package
+(in `io/`) by git revision; it is rlib-only and defines neither component exports
+nor entropy registrations. A wasm cdylib consumer was linked with its own
+getrandom 0.2 and 0.3 custom registrations; Cargo also located this workspace
+member by git revision. The adapter supplies the two clock seams the Turso fork
+declares. Consumers provide the entropy registrations needed by their own wasm
+graph. Use `dekopon_turso_sql_io::with_database` to install authorized storage,
+open `main.db` with the provider's PRAGMAs, and checkpoint its WAL even when
+SQL/output fails.
 
 Requires the pinned toolchain and `wasm-tools`, because component encoding is not stable across
 versions and the build is meant to be reproducible:
@@ -227,7 +229,7 @@ from either side alone:
 
 - The fork **declares** `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` as
   `unsafe extern "Rust"` in `core/io/clock.rs`. The adapter package **defines** them in `io/src/lib.rs`. The fork
-  does not link for wasm32 without an embedder supplying both symbols.
+  does not link for wasm32 without `io/src/lib.rs` supplying both symbols.
 - The fork flips the wasm32 `getrandom` backend to `custom`. This crate registers the custom backend
   for all three `getrandom` majors in the graph, in `src/component.rs`.
 

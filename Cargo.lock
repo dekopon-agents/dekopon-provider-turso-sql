@@ -958,7 +958,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "turso_core",
 ]
 
 [[package]]

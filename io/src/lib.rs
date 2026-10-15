@@ -15,17 +15,19 @@
 //!   outright, so an unchunked request returns an error rather than a short
 //!   buffer — which would otherwise leave a caller's buffer silently unfilled.
 //!
-//! This module defines the `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` clock seams
+//! This crate defines the `__dekopon_monotonic_time_ns` and `__dekopon_wall_time_ms` clock seams
 //! the patched Turso engine declares; an embedder must not define them again.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use dekopon_provider_sdk::provider::{DurableFiles, Storage, durable_files as df};
+
+pub use turso_core;
 thread_local! {
     static STORAGE: RefCell<Option<Storage<DurableFiles>>> = const { RefCell::new(None) };
 }
-pub fn with_storage<T>(storage: Storage<DurableFiles>, run: impl FnOnce() -> T) -> T {
+pub(crate) fn with_storage<T>(storage: Storage<DurableFiles>, run: impl FnOnce() -> T) -> T {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -213,20 +215,20 @@ pub fn fill_entropy(dest: &mut [u8]) -> usize {
 // ---------- clock seam consumed by the patched turso_core ----------
 
 #[unsafe(no_mangle)]
-extern "Rust" fn __dekopon_monotonic_time_ns() -> u64 {
+pub extern "Rust" fn __dekopon_monotonic_time_ns() -> u64 {
     bump(|trace| trace.monotonic += 1);
     storage(|df| df.monotonic_time_ns()).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
-extern "Rust" fn __dekopon_wall_time_ms() -> u64 {
+pub extern "Rust" fn __dekopon_wall_time_ms() -> u64 {
     bump(|trace| trace.wall += 1);
     storage(|df| df.wall_time_ms()).unwrap_or(0)
 }
 
 // ---------- IO ----------
 
-pub struct DekoponIo {
+pub(crate) struct DekoponIo {
     base_ns: Cell<u64>,
 }
 
@@ -339,7 +341,7 @@ impl IO for DekoponIo {
 
 // ---------- File ----------
 
-pub struct DekoponFile {
+pub(crate) struct DekoponFile {
     file: df::File,
 }
 

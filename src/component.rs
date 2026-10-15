@@ -6,6 +6,7 @@ use dekopon_provider_sdk::provider::{
     self, Capability, Code, DurableFiles, Failure, Proposal, Provider, Stdout, Storage, Usage,
 };
 use dekopon_provider_sdk::{EffectKind, RiskLevel};
+use io::turso_core::{Connection, IO, StepResult, Value as SqlValue};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -14,7 +15,6 @@ use std::{
     io::{Read, Write},
     sync::Arc,
 };
-use turso_core::{Connection, IO, StepResult, Value as SqlValue};
 
 const REFUSED: [&str; 1] = ["vacuum"];
 const MAX_STDIN_BYTES: u64 = 1024 * 1024;
@@ -254,15 +254,15 @@ fn sql_to_json(value: &SqlValue) -> Value {
     match value {
         SqlValue::Null => Value::Null,
         SqlValue::Numeric(numeric) => match numeric {
-            turso_core::Numeric::Integer(integer) => json!(integer),
-            turso_core::Numeric::Float(float) => json!(f64::from(*float)),
+            io::turso_core::Numeric::Integer(integer) => json!(integer),
+            io::turso_core::Numeric::Float(float) => json!(f64::from(*float)),
         },
         SqlValue::Text(text) => Value::String(text.as_str().to_owned()),
         SqlValue::Blob(blob) => json!({"blob": blob.as_slice().len()}),
     }
 }
 
-// Only the component build owns these linker-wide entropy symbols. An adapter-only
+// Only the provider owns these linker-wide entropy symbols. An adapter-only
 // consumer supplies its own registrations and export! entry points.
 fn dekopon_entropy(dest: &mut [u8]) -> std::result::Result<(), getrandom02::Error> {
     if io::fill_entropy(dest) == dest.len() {
@@ -357,7 +357,7 @@ mod tests {
     fn sql_values_preserve_text_and_blob_length() {
         assert_eq!(sql_to_json(&SqlValue::Null), Value::Null);
         assert_eq!(
-            sql_to_json(&SqlValue::Numeric(turso_core::Numeric::Integer(7))),
+            sql_to_json(&SqlValue::Numeric(io::turso_core::Numeric::Integer(7))),
             json!(7)
         );
         assert_eq!(sql_to_json(&SqlValue::build_text("hello")), json!("hello"));
