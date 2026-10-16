@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "dekopon-turso-sql-io"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "dekopon-provider-sdk",
  "turso_core",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "dekopon-turso-sql-provider"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "dekopon-broker-host",
