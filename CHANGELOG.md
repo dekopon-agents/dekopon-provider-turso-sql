@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-10-15
+
+### Changed
+
+- Turso SQL builds on the Dekopon 0.33.0 SDK. Its durable-files adapter is reusable by another
+  provider, which links it by git rev.
+- The durable-files adapter moved from the provider crate to the rlib-only `dekopon-turso-sql-io`
+  package in `io/`; components that reuse it depend on that package by git rev.
+
 ## [0.6.0] - 2026-10-03
 
 ### Changed
