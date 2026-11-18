@@ -8,6 +8,7 @@ all-features = false
 [advisories]
 ignore = [
   { id = "RUSTSEC-2024-0449", reason = "unmaintained, not a vulnerability: unsafe-libyaml 0.2.11 reaches the graph only through dekopon-core's serde_yaml_ng 0.10; removable with dekopon#542" },
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, not a vulnerability: chrono 0.4.45 reaches the graph only through turso_core and turso_ext (dekopon-agents/turso rev b4aad334); removable when the turso fork drops it" },
 ]
 
 [licenses]
